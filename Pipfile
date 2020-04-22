@@ -9,6 +9,11 @@ verify_ssl = true
 qualia = {editable = true,path = "/home/soto/p/qualia"}
 pyhamcrest = "*"
 behave = "*"
+click = "*"
+xdg = "*"
 
 [requires]
 python_version = "3.7"
+
+[scripts]
+pachinko = "python -m pachinko.main"

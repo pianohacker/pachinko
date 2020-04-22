@@ -1,6 +1,7 @@
 from behave import given, when, then, use_step_matcher
 from hamcrest import *
 import io
+import os
 from os import path
 import shlex
 import shutil
@@ -10,7 +11,7 @@ import tempfile
 from pachinko import main
 
 def _get_temp_directory(context):
-	dir = tempfile.mkdtemp(prefix = 'qualia-tests-')
+	dir = tempfile.mkdtemp(prefix = 'pachinko-tests-')
 
 	context.add_cleanup(lambda: shutil.rmtree(dir))
 
@@ -35,13 +36,42 @@ def step_impl(context, arguments):
 	try:
 		main.main()
 
+		context.exit_code = 0
+	except SystemExit as e:
+		if isinstance(e.code, int):
+			context.exit_code = e.code
+		elif e.code is not None:
+			context.exit_code = 1
+	finally:
 		context.stdout = sys.stdout.getvalue()
 		context.stderr = sys.stderr.getvalue()
-	finally:
+
 		sys.stdout = old_stdout
 		sys.stderr = old_stderr
 		sys.argv = old_argv
 
-@then(r'the output contains `(?P<match>[^`]*)`')
+@then(r'we expect `(?P<match>[^`]*)`')
 def step_impl(context, match):
 	assert_that(context.stdout, matches_regexp(match))
+
+@then(r'we expect the error `(?P<match>[^`]*)`')
+def step_impl(context, match):
+	assert_that(context.stderr, matches_regexp(match))
+
+@then('we expect no output')
+def step_impl(context):
+	assert_that(context.stdout, empty())
+
+@then('we expect no errors')
+def step_impl(context):
+	assert_that(context.stderr, empty())
+
+@then('we expect a nonzero exit code')
+def step_impl(context):
+	assert_that(context.exit_code, is_not(0))
+
+@then('we expect silent success')
+def step_impl(context):
+	assert_that(context.stderr, empty())
+	assert_that(context.stdout, empty())
+	assert_that(context.exit_code, is_(0))
