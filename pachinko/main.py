@@ -8,15 +8,20 @@
 
 import click
 import functools
+import itertools
 from os import path
 import qualia
 from qualia import query
 import os 
+import random
+import re
 import sys
 import xdg
 
 def _default_pachinko_dir():
 	return str(xdg.XDG_DATA_HOME / 'pachinko')
+
+SIZE_KEY = {'S': 1, 'M': 1.5, 'L': 2, 'X': 3}
 
 @click.group()
 @click.option(
@@ -61,15 +66,32 @@ def locations(ctx, store):
 	for location in store.select(type = 'location'):
 		print(f'{location["name"]} ({location["num_bins"]} bins)')
 
+def _find_bin(store, location, size):
+	bin_weights = {bin_no: 0 for bin_no in range(1, location['num_bins'] + 1)}
+
+	for item in store.select(type = 'item', location_id = location['object_id']):
+		bin_weights[item['bin_no']] += SIZE_KEY[item['size']]
+	
+	_, min_weight = min(bin_weights.items(), key = lambda kv: kv[1])
+
+	return random.choice([bin_no for (bin_no, weight) in bin_weights.items() if weight == min_weight])
+
 @_pachinko.command("add")
 @click.argument('location_bin', metavar = 'LOCATION[/BIN]')
 @click.argument('NAME')
 @click.argument('SIZE', type = click.Choice(['S', 'M', 'X', 'L']), default = 'S')
 @_pass_store
 def add(ctx, store, location_bin, name, size):
-	location_name, bin = location_bin.split('/')
+	match = re.match("([^/]+)(?:\/([1-9]\d*))?", location_bin)
+	if match is None:
+		raise click.BadParameter('Expected a location name (/ an optional bin number)', param_hint = 'LOCATION[/BIN]')
+
+	location_name, bin = match.groups()
 
 	location = list(store.query(query.PhraseQuery('name', location_name)))[0]
+
+	if bin is None:
+		bin = _find_bin(store, location, size)
 
 	store.add(type = 'item', location_id = location['object_id'], bin_no = int(bin), name = name, size = size)
 
