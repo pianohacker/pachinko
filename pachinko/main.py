@@ -76,26 +76,73 @@ def _find_bin(store, location, size):
 
 	return random.choice([bin_no for (bin_no, weight) in bin_weights.items() if weight == min_weight])
 
+class LocationBinParamType(click.ParamType):
+	def convert(self, value, param, ctx):
+		if isinstance(value, tuple):
+			return value
+
+		match = re.match("([^/]+)(?:\/([1-9]\d*))?", value)
+		if match is None:
+			self.fail('Expected a location name (/ an optional bin number)')
+
+		location_name, bin = match.groups()
+
+		locations = list(ctx.obj['store'].query(
+			query.AndQueries(
+				query.EqualityQuery('type', 'location'),
+				query.PhraseQuery('name', location_name),
+			)
+		))
+
+		if len(locations) == 0:
+			self.fail('Did not find a matching location')
+
+		if len(locations) > 1:
+			self.fail(f'Found multiple matching locations: {locations!r}')
+
+		if bin and int(bin) > locations[0]["num_bins"]:
+			self.fail(f'Bin out of range (1-{locations[0]["num_bins"]}) for given location')
+
+		return locations[0], bin
+
+def print_item(item):
+	print('{location_name}/{item_bin_no}: {item_name} ({item_size})'.format(**item))
+
 @_pachinko.command("add")
-@click.argument('location_bin', metavar = 'LOCATION[/BIN]')
+@click.argument('location_bin', metavar = 'LOCATION[/BIN]', type = LocationBinParamType())
 @click.argument('NAME')
 @click.argument('SIZE', type = click.Choice(['S', 'M', 'X', 'L']), default = 'S')
 @_pass_store
 def add(ctx, store, location_bin, name, size):
-	match = re.match("([^/]+)(?:\/([1-9]\d*))?", location_bin)
-	if match is None:
-		raise click.BadParameter('Expected a location name (/ an optional bin number)', param_hint = 'LOCATION[/BIN]')
-
-	location_name, bin = match.groups()
-
-	location = list(store.query(query.PhraseQuery('name', location_name)))[0]
+	location, bin = location_bin
 
 	if bin is None:
 		bin = _find_bin(store, location, size)
 
-	store.add(type = 'item', location_id = location['object_id'], bin_no = int(bin), name = name, size = size)
+	item = dict(type = 'item', location_id = location['object_id'], bin_no = int(bin), name = name, size = size)
+
+	store.add(**item)
 
 	store.commit()
+
+	print_item(dict((('item_' + k, v) for (k,v) in item.items()), location_name = location['name']))
+
+@_pachinko.command("quickadd")
+@click.argument('location_bin', metavar = 'LOCATION[/BIN]', type = LocationBinParamType())
+@_pass_store
+def quickadd(ctx, store, location_bin):
+	location, bin = location_bin
+
+	prompt = f'{location["name"]}> ' if bin is None else f'{location["name"]}/{bin}> '
+	while True:
+		item = input(prompt)
+
+		size = 'S'
+		match = re.match("(.*?)\s+([SMLX])$", item)
+		if match is not None:
+			item, size = match.groups()
+
+		ctx.forward(add, name = item, size = size)
 
 @_pachinko.command("items")
 @_pass_store
@@ -111,7 +158,7 @@ def items(ctx, store):
 		})
 
 	for item in sorted(items, key = lambda item: (item["location_name"], item["item_bin_no"], item["item_name"].lower())):
-		print('{location_name}/{item_bin_no}: {item_name} ({item_size})'.format(**item))
+		print_item(item)
 
 def main():
 	_pachinko(obj = {})

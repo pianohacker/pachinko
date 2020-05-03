@@ -24,8 +24,11 @@ def step_impl(context):
 
 use_step_matcher('re')
 
-@when(r'we execute `(?P<arguments>[^`]*)`')
-def step_impl(context, arguments):
+def _run_command(context, arguments, input = None):
+	old_stdin = sys.stdin
+	if input is not None:
+		sys.stdin = io.StringIO(input)
+
 	old_stdout = sys.stdout
 	sys.stdout = io.StringIO()
 	old_stderr = sys.stderr
@@ -46,9 +49,18 @@ def step_impl(context, arguments):
 		context.stdout = sys.stdout.getvalue()
 		context.stderr = sys.stderr.getvalue()
 
+		sys.stdin = old_stdin
 		sys.stdout = old_stdout
 		sys.stderr = old_stderr
 		sys.argv = old_argv
+
+@when(r'we execute `(?P<arguments>[^`]*)`')
+def step_impl(context, arguments):
+	_run_command(context, arguments)
+
+@when(r'we execute `(?P<arguments>[^`]*)` with the input')
+def step_impl(context, arguments):
+	_run_command(context, arguments, input = context.text)
 
 @then(r'we expect `(?P<match>[^`]*)`')
 def step_impl(context, match):
@@ -69,6 +81,10 @@ def step_impl(context):
 @then('we expect a nonzero exit code')
 def step_impl(context):
 	assert_that(context.exit_code, is_not(0))
+
+@then('we expect success')
+def step_impl(context):
+	assert_that(context.exit_code, is_(0))
 
 @then('we expect silent success')
 def step_impl(context):
