@@ -65,6 +65,11 @@ def step_impl(context, arguments):
 @then(r'we expect `(?P<match>[^`]*)`')
 def step_impl(context, match):
 	assert_that(context.stdout, matches_regexp(match))
+	assert_that(context.stderr, empty())
+
+@then(r'we expect the output `(?P<match>[^`]*)`')
+def step_impl(context, match):
+	assert_that(context.stdout, matches_regexp(match))
 
 @then(r'we expect the error `(?P<match>[^`]*)`')
 def step_impl(context, match):

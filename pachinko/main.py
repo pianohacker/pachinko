@@ -135,7 +135,13 @@ def quickadd(ctx, store, location_bin):
 
 	prompt = f'{location["name"]}> ' if bin is None else f'{location["name"]}/{bin}> '
 	while True:
-		item = input(prompt)
+		try:
+			item = input(prompt)
+		except EOFError:
+			break
+
+		if item == '':
+			break
 
 		size = 'S'
 		match = re.match("(.*?)\s+([SMLX])$", item)
