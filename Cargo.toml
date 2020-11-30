@@ -1,0 +1,13 @@
+[package]
+name = "pachinko"
+version = "0.1.0"
+authors = ["Jesse Weaver <pianohacker@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+qualia = { version = "0.5", path = "../qualia" }
+anyhow = "1.0" # Flexible concrete Error type built on std::error::Error
+clap = "3.0.0-beta.2"
+dirs = "1.0"
