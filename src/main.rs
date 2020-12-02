@@ -10,7 +10,6 @@ use anyhow::{anyhow, bail, Context, Result as AHResult};
 use clap::Clap;
 use qualia::query;
 use qualia::{Object, Store};
-use rand::seq::IteratorRandom;
 use std::collections::HashMap;
 use std::env;
 
@@ -238,16 +237,15 @@ fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> 
         .min()
         .unwrap_or(&0);
 
-    Ok(*bin_fullnesses
-        .iter()
-        .filter_map(|(bin_no, fullness)| {
-            if fullness <= min_fullness {
+    Ok((1..=num_bins)
+        .filter_map(|bin_no| {
+            if bin_fullnesses[&bin_no] <= *min_fullness {
                 Some(bin_no)
             } else {
                 None
             }
         })
-        .choose(&mut rand::thread_rng())
+        .next()
         .unwrap())
 }
 

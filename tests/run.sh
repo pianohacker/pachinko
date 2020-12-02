@@ -208,6 +208,15 @@ function test_items_should_distribute_to_the_most_empty_slot() {
 	assert_pch_match "add test \"X3\" X" "Test/1: X3 .*"
 }
 
+function test_items_should_distribute_to_the_first_possible_slot() {
+	_setup_example_locations
+
+	assert_pch "add test/2 \"L\" L"
+
+	assert_pch_match "add test \"X2\" X" "Test/1: X2 .*"
+	assert_pch_match "add test \"X3\" X" "Test/3: X3 .*"
+}
+
 function test_quick_addition_into_random_bins() {
 	_setup_example_locations
 
