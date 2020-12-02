@@ -29,7 +29,7 @@ if [[ -n ${RUST_NIGHTLY:-} ]]; then
 else
 	cargo build ${CARGO_FLAGS:---release}
 fi
-PACHINKO=$PWD/target/release/pachinko
+PACHINKO="$(cargo metadata --format-version 1 | jq -r .target_directory)"/release/pachinko
 
 cd $TEST_DIR
 trap "rm -rf $TEST_DIR" EXIT
@@ -173,6 +173,49 @@ function test_items_should_sort_by_location,_then_bin,_then_alphabetically() {
 Test/3: Test item.*\
 Test/4: Test blight'em.*\
 Test/4: Test item"
+}
+
+function test_adding_an_item_without_a_bin_should_place_it_in_a_random_slot() {
+	_setup_example_locations
+
+	assert_pch_match "add test \"Test item\"" "Test/[1-4]: Test item .*"
+}
+
+function test_items_should_distribute_evenly() {
+	_setup_example_locations
+
+	assert_pch "add test \"Test item\""
+	assert_pch "add test \"Test item\""
+	assert_pch "add test \"Test item\""
+	assert_pch "add test \"Test item\""
+
+	assert_pch_match "items" "Test/1: Test item .*\
+Test/2: Test item .*\
+Test/3: Test item .*\
+Test/4: Test item .*\
+"
+}
+
+function test_items_should_distribute_to_the_most_empty_slot() {
+	_setup_example_locations
+
+	assert_pch "add test/1 \"M\" M"
+	assert_pch "add test/2 \"S\" S"
+	assert_pch "add test/3 \"L\" L"
+	assert_pch "add test/4 \"X\" X"
+
+	assert_pch_match "add test \"X2\" X" "Test/2: X2 .*"
+	assert_pch_match "add test \"X3\" X" "Test/1: X3 .*"
+}
+
+function test_quick_addition_into_random_bins() {
+	_setup_example_locations
+
+	echo 'Test 1
+Test 2
+Test 3 M' | assert_pch_match 'quickadd Test' 'Test/[1234]: Test 1 \(S\)
+Test/[1234]: Test 2 \(S\)
+Test/[1234]: Test 3 \(M\)'
 }
 
 ## Test running loop

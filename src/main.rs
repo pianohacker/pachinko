@@ -10,6 +10,8 @@ use anyhow::{anyhow, bail, Context, Result as AHResult};
 use clap::Clap;
 use qualia::query;
 use qualia::{Object, Store};
+use rand::seq::IteratorRandom;
+use std::collections::HashMap;
 use std::env;
 
 trait ObjectGetHelpers {
@@ -55,6 +57,9 @@ enum SubCommand {
 
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing locations")]
     Locations(CommonOpts),
+
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Quickly add several items to a location")]
+    Quickadd(QuickaddOpts),
 }
 
 #[derive(Clap)]
@@ -127,6 +132,19 @@ enum ItemSizeOpt {
     X,
 }
 
+impl std::str::FromStr for ItemSizeOpt {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> AHResult<Self> {
+        match s {
+            "S" => Ok(ItemSizeOpt::S),
+            "M" => Ok(ItemSizeOpt::M),
+            "L" => Ok(ItemSizeOpt::L),
+            "X" => Ok(ItemSizeOpt::X),
+            _ => Err(anyhow!("attempt to convert size from not \"[SMLX]\"")),
+        }
+    }
+}
+
 impl ToString for ItemSizeOpt {
     fn to_string(&self) -> std::string::String {
         match self {
@@ -136,6 +154,17 @@ impl ToString for ItemSizeOpt {
             ItemSizeOpt::X => "X",
         }
         .to_string()
+    }
+}
+
+impl From<ItemSizeOpt> for i64 {
+    fn from(size: ItemSizeOpt) -> i64 {
+        match size {
+            ItemSizeOpt::S => 2,
+            ItemSizeOpt::M => 3,
+            ItemSizeOpt::L => 4,
+            ItemSizeOpt::X => 6,
+        }
     }
 }
 
@@ -157,11 +186,7 @@ impl WithCommonOpts for AddOpts {
     }
 }
 
-fn run_add(opts: AddOpts) -> AHResult<()> {
-    let mut store = opts.common.open_store()?;
-
-    // eprintln!("{:#?}", store.all().iter()?.collect::<Vec<Object>>());
-
+fn _resolve_location(store: &Store, location: &ItemLocation) -> AHResult<Object> {
     let matching_locations = store.query(Box::new(query::And(vec![
         Box::new(query::PropEqual {
             name: "type".to_string(),
@@ -169,47 +194,126 @@ fn run_add(opts: AddOpts) -> AHResult<()> {
         }),
         Box::new(query::PropLike {
             name: "name".to_string(),
-            value: opts.location.location.clone().into(),
+            value: location.location.clone().into(),
         }),
     ])));
 
     if matching_locations.len()? != 1 {
         bail!(
             "location name \"{}\" did not match exactly one location",
-            opts.location.location
+            location.location
         );
     }
 
-    let location = matching_locations.iter()?.next().unwrap();
+    Ok(matching_locations.iter()?.next().unwrap())
+}
 
+fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> {
+    let all_location_items = store.query(Box::new(query::And(vec![
+        Box::new(query::PropEqual {
+            name: "type".to_string(),
+            value: "item".into(),
+        }),
+        Box::new(query::PropEqual {
+            name: "location_id".to_string(),
+            value: location_id.into(),
+        }),
+    ])));
+
+    let mut bin_fullnesses: HashMap<i64, i64> = (1..=num_bins).map(|bin_no| (bin_no, 0)).collect();
+    all_location_items
+        .iter()?
+        .try_for_each(|item| -> AHResult<()> {
+            let bin_number = item.get_number("item", "bin_no")?;
+            let size: ItemSizeOpt = item.get_str("item", "size")?.parse::<ItemSizeOpt>()?;
+
+            *bin_fullnesses.get_mut(&bin_number).unwrap() += i64::from(size);
+
+            Ok(())
+        })?;
+
+    let min_fullness = bin_fullnesses
+        .iter()
+        .map(|(_, fullness)| fullness)
+        .min()
+        .unwrap_or(&0);
+
+    Ok(*bin_fullnesses
+        .iter()
+        .filter_map(|(bin_no, fullness)| {
+            if fullness <= min_fullness {
+                Some(bin_no)
+            } else {
+                None
+            }
+        })
+        .choose(&mut rand::thread_rng())
+        .unwrap())
+}
+
+fn _add_item(
+    store: &mut Store,
+    name: String,
+    location: &Object,
+    bin_no: Option<i64>,
+    size: ItemSizeOpt,
+) -> AHResult<()> {
     let num_bins = location.get_number("location", "num_bins")?;
 
-    if opts.location.bin.unwrap() > num_bins {
-        bail!(
-            "location {} only has {} bins",
-            opts.location.location,
-            num_bins
-        );
-    }
+    let bin_number = match bin_no {
+        Some(n) => {
+            if n > num_bins {
+                bail!(
+                    "location {} only has {} bins",
+                    location.get_str("location", "name")?,
+                    num_bins
+                );
+            }
+            n
+        }
+        None => _choose_bin(
+            &store,
+            location.get_number("location", "object-id")?,
+            num_bins,
+        )?,
+    };
 
     let location_id = location.get_number("location", "object-id")?;
 
     let mut item = Object::new();
     item.insert("type".to_string(), "item".to_string().into());
-    item.insert("name".to_string(), (&opts.name).into());
+    item.insert("name".to_string(), (&name).into());
     item.insert("location_id".to_string(), location_id.into());
-    item.insert("bin_no".to_string(), opts.location.bin.unwrap().into());
-    item.insert("size".to_string(), (&opts.size.to_string()).into());
+    item.insert("bin_no".to_string(), bin_number.into());
+    item.insert("size".to_string(), size.to_string().into());
 
     store.add(item)?;
 
     println!(
         "{}/{}: {} ({})",
         location.get_str("location", "name")?,
-        opts.location.bin.unwrap(),
-        opts.name,
-        opts.size.to_string(),
+        bin_number,
+        name,
+        size.to_string(),
     );
+
+    Ok(())
+}
+
+fn run_add(opts: AddOpts) -> AHResult<()> {
+    let mut store = opts.common.open_store()?;
+
+    // eprintln!("{:#?}", store.all().iter()?.collect::<Vec<Object>>());
+
+    let location = _resolve_location(&store, &opts.location)?;
+
+    _add_item(
+        &mut store,
+        opts.name,
+        &location,
+        opts.location.bin,
+        opts.size,
+    )?;
 
     Ok(())
 }
@@ -285,6 +389,14 @@ fn run_items(opts: CommonOpts) -> AHResult<()> {
     Ok(())
 }
 
+#[derive(Clap)]
+struct QuickaddOpts {
+    #[clap(flatten)]
+    common: CommonOpts,
+    #[clap()]
+    location: ItemLocation,
+}
+
 fn run_locations(opts: CommonOpts) -> AHResult<()> {
     let store = opts.open_store()?;
 
@@ -305,6 +417,42 @@ fn run_locations(opts: CommonOpts) -> AHResult<()> {
     Ok(())
 }
 
+fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
+    let mut store = opts.common.open_store()?;
+
+    // eprintln!("{:#?}", store.all().iter()?.collect::<Vec<Object>>());
+
+    let location = _resolve_location(&store, &opts.location)?;
+
+    let bin_number_display = match opts.location.bin {
+        Some(bin_no) => format!("/{}", bin_no),
+        None => "".to_string(),
+    };
+    let prompt = location.get_str("location", "name")? + &bin_number_display + "> ";
+
+    let mut rl = rustyline::Editor::<()>::new();
+
+    while let Ok(line) = rl.readline(&prompt) {
+        let mut name = line.trim().to_string();
+        let mut size = ItemSizeOpt::S;
+
+        if let Some(cap) = regex::Regex::new(r"^(.*?)\s+([SMLX])$")?.captures(line.trim()) {
+            name = cap[1].to_string();
+            size = cap[2].parse()?;
+        }
+
+        _add_item(
+            &mut store,
+            name.to_string(),
+            &location,
+            opts.location.bin,
+            size,
+        )?;
+    }
+
+    Ok(())
+}
+
 fn main() -> AHResult<()> {
     let opt = Opts::parse();
 
@@ -313,5 +461,6 @@ fn main() -> AHResult<()> {
         SubCommand::Items(o) => run_items(o),
         SubCommand::AddLocation(o) => run_add_location(o),
         SubCommand::Locations(o) => run_locations(o),
+        SubCommand::Quickadd(o) => run_quickadd(o),
     }
 }

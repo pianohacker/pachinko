@@ -11,3 +11,6 @@ qualia = { version = "0.5", path = "../qualia" }
 anyhow = "1.0" # Flexible concrete Error type built on std::error::Error
 clap = "3.0.0-beta.2"
 dirs = "1.0"
+rand = "0.7" # Random number generators and other randomness functionality. 
+rustyline = "7.0" # Rustyline, a readline implementation based on Antirez's Linenoise
+regex = "1.4" # An implementation of regular expressions for Rust. This implementation uses finite automata and gua…
