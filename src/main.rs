@@ -475,26 +475,26 @@ fn run_console(opts: CommonOpts) -> AHResult<()> {
     let mut rl = Editor::<()>::new();
 
     while let Ok(line) = rl.readline("pachinko> ") {
-        let mut words = match shell_words::split(&line) {
-            Ok(w) => w,
-            Err(e) => {
-                println!("Error: {}", e);
-                continue;
-            }
-        };
+        let continue_console = || -> AHResult<bool> {
+            let mut words = shell_words::split(&line)?;
+            words.insert(0, "pachinko".to_string());
+            let console_opts = ConsoleOpts::try_parse_from(words)?;
 
-        words.insert(0, "pachinko".to_string());
-        let console_opts = ConsoleOpts::try_parse_from(words)?;
+            match console_opts.subcmd {
+                ConsoleSubCommand::Quit => return Ok(false),
+                ConsoleSubCommand::Base(sc) => sc.invoke()?,
+            };
 
-        let result = match console_opts.subcmd {
-            ConsoleSubCommand::Quit => {
-                break;
-            }
-            ConsoleSubCommand::Base(sc) => sc.invoke(),
-        };
-
-        if let Err(e) = result {
+            Ok(true)
+        }()
+        .unwrap_or_else(|e| {
             println!("Error: {}", e);
+
+            true
+        });
+
+        if !continue_console {
+            break;
         }
     }
 

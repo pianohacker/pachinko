@@ -5,6 +5,7 @@ pub struct TestContext {
     pub temp_dir: TempDir,
 }
 
+#[allow(dead_code)]
 impl TestContext {
     pub fn pch_cmd(&self, arguments: &[&str]) -> std::process::Command {
         let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin("pachinko"));
@@ -33,7 +34,6 @@ impl TestContext {
         self.pch_assert_cmd(arguments).assert().success()
     }
 
-    #[allow(dead_code)]
     pub fn assert_pch_fails(&self, arguments: &[&str]) -> assert_cmd::assert::Assert {
         self.pch_assert_cmd(arguments).assert().failure()
     }
