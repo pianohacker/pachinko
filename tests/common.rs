@@ -1,4 +1,3 @@
-use assert_cmd::Command;
 use predicates::prelude::*;
 pub use tempdir::TempDir;
 
@@ -7,24 +6,35 @@ pub struct TestContext {
 }
 
 impl TestContext {
-    pub fn pch_cmd(&self, arguments: &[&str]) -> assert_cmd::Command {
-        let mut cmd = Command::cargo_bin("pachinko").unwrap();
+    pub fn pch_cmd(&self, arguments: &[&str]) -> std::process::Command {
+        let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin("pachinko"));
 
-        cmd.args(arguments).env(
-            "PACHINKO_STORE_PATH",
-            self.temp_dir.path().join("pachinko-test-store.qualia"),
-        );
+        cmd.args(arguments)
+            .current_dir(self.temp_dir.path())
+            .env("PACHINKO_STORE_PATH", self.store_path());
 
         cmd
     }
 
+    pub fn pch_assert_cmd(&self, arguments: &[&str]) -> assert_cmd::Command {
+        assert_cmd::Command::from(self.pch_cmd(arguments))
+    }
+
+    pub fn store_path(&self) -> String {
+        self.temp_dir
+            .path()
+            .join("pachinko-test-store.qualia")
+            .to_string_lossy()
+            .into_owned()
+    }
+
     pub fn assert_pch(&self, arguments: &[&str]) -> assert_cmd::assert::Assert {
-        self.pch_cmd(arguments).assert().success()
+        self.pch_assert_cmd(arguments).assert().success()
     }
 
     #[allow(dead_code)]
     pub fn assert_pch_fails(&self, arguments: &[&str]) -> assert_cmd::assert::Assert {
-        self.pch_cmd(arguments).assert().failure()
+        self.pch_assert_cmd(arguments).assert().failure()
     }
 
     pub fn populate(&self) {

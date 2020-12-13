@@ -88,6 +88,18 @@ trait WithCommonOpts {
     fn common_opts(&self) -> &CommonOpts;
 }
 
+fn parse_bin_number(s: &str) -> AHResult<i64> {
+    Ok(s.parse::<i64>()
+        .context("failed to parse bin number")
+        .and_then(|x| {
+            if x > 0 {
+                Ok(x)
+            } else {
+                Err(anyhow!("must be greater than zero"))
+            }
+        })?)
+}
+
 struct ItemLocation {
     location: String,
     bin: Option<i64>,
@@ -104,15 +116,11 @@ impl std::str::FromStr for ItemLocation {
                 bin: None,
             }),
             2 => {
-                let bin_number: u64 = parts[1]
-                    .parse()
-                    .ok()
-                    .and_then(|x| if x > 0 { Some(x) } else { None })
-                    .context("bin number must be a number > 0")?;
+                let bin_number = parse_bin_number(parts[1])?;
 
                 Ok(Self {
                     location: parts[0].to_string(),
-                    bin: Some(bin_number as i64),
+                    bin: Some(bin_number),
                 })
             }
             _ => {
@@ -322,8 +330,8 @@ struct AddLocationOpts {
     common: CommonOpts,
     #[clap()]
     name: String,
-    #[clap()]
-    num_bins: u64,
+    #[clap(parse(from_str = parse_bin_number))]
+    num_bins: AHResult<i64>,
 }
 
 impl WithCommonOpts for AddLocationOpts {
@@ -338,7 +346,7 @@ fn run_add_location(opts: AddLocationOpts) -> AHResult<()> {
     let mut location = Object::new();
     location.insert("type".to_string(), "location".to_string().into());
     location.insert("name".to_string(), opts.name.into());
-    location.insert("num_bins".to_string(), (opts.num_bins as i64).into());
+    location.insert("num_bins".to_string(), opts.num_bins?.into());
 
     store.add(location)?;
 

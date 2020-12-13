@@ -23,5 +23,6 @@ fn creating_a_location_with_an_invalid_number_of_bins_should_fail() {
     init!(ctx);
     ctx.populate();
 
+    ctx.assert_pch_fails(&["add-location", "Zero", "0"]);
     ctx.assert_pch_fails(&["add-location", "Negative", "-1"]);
 }
