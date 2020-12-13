@@ -7,7 +7,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{anyhow, bail, Context, Result as AHResult};
-use clap::Clap;
+use clap::{AppSettings, Clap};
 use qualia::query;
 use qualia::{Object, Store};
 use rustyline::Editor;
@@ -420,6 +420,7 @@ fn run_items(opts: CommonOpts) -> AHResult<()> {
 }
 
 #[derive(Clap)]
+#[clap(setting = AppSettings::NoBinaryName)]
 struct ConsoleOpts {
     #[clap(subcommand)]
     subcmd: ConsoleSubCommand,
@@ -434,40 +435,6 @@ enum ConsoleSubCommand {
     Quit,
 }
 
-// trait print
-
-// let mut console_app = <ConsoleOpts as clap::IntoApp>::into_app();
-//     let mut subcommands: BTreeMap<String, &mut clap::App> = console_app
-//         .get_subcommands_mut()
-//         .filter_map(|subcommand| {
-//             if subcommand.get_name() != "console" {
-//                 Some((subcommand.get_name().to_string(), subcommand))
-//             } else {
-//                 None
-//             }
-//         })
-//         .collect();
-
-//     while let Ok(line) = rl.readline("pachinko> ") {
-//         eprintln!("parse result: {:#?}", ConsoleOpts::try_parse_from(vec!["pachinko", line.trim()])?;
-//         let console_opts = ConsoleOpts::try_parse_from(vec!["pachinko", line.trim()])?;
-
-//         match console_opts.subcmd {
-//             ConsoleSubCommand::Help => {
-//                 println!("Available commands:");
-
-//                 for subcommand in subcommands.values_mut() {
-//                     println!(
-//                         "{:12}  {}",
-//                         subcommand.get_name(),
-//                         subcommand.get_about().unwrap()
-//                     );
-//                 }
-//             }
-//             _ => {}
-//         }
-//     }
-
 fn run_console(opts: CommonOpts) -> AHResult<()> {
     // Make sure the store can be opened before we try to run any commands.
     opts.open_store().unwrap();
@@ -476,16 +443,23 @@ fn run_console(opts: CommonOpts) -> AHResult<()> {
 
     while let Ok(line) = rl.readline("pachinko> ") {
         let continue_console = || -> AHResult<bool> {
-            let mut words = shell_words::split(&line)?;
-            words.insert(0, "pachinko".to_string());
+            let words = shell_words::split(&line)?;
+
+            if words[0] == "help" {
+                <ConsoleOpts as clap::IntoApp>::into_app()
+                    .help_template("Available commands:\n{subcommands}")
+                    .print_help()?;
+
+                return Ok(true);
+            }
+
             let console_opts = ConsoleOpts::try_parse_from(words)?;
 
             match console_opts.subcmd {
-                ConsoleSubCommand::Quit => return Ok(false),
-                ConsoleSubCommand::Base(sc) => sc.invoke()?,
-            };
-
-            Ok(true)
+                ConsoleSubCommand::Quit => Ok(false),
+                ConsoleSubCommand::Base(SubCommand::Console(_)) => Ok(true),
+                ConsoleSubCommand::Base(sc) => sc.invoke().map(|_| true),
+            }
         }()
         .unwrap_or_else(|e| {
             println!("Error: {}", e);
