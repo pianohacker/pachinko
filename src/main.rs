@@ -10,7 +10,9 @@ use anyhow::{anyhow, bail, Context, Result as AHResult};
 use clap::Clap;
 use qualia::query;
 use qualia::{Object, Store};
-use std::collections::HashMap;
+use rustyline::Editor;
+use shell_words;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 
 trait ObjectGetHelpers {
@@ -51,6 +53,9 @@ enum SubCommand {
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Add a location")]
     AddLocation(AddLocationOpts),
 
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Run several commands from an interactive console")]
+    Console(CommonOpts),
+
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing items")]
     Items(CommonOpts),
 
@@ -59,6 +64,19 @@ enum SubCommand {
 
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Quickly add several items to a location")]
     Quickadd(QuickaddOpts),
+}
+
+impl SubCommand {
+    fn invoke(self) -> AHResult<()> {
+        match self {
+            SubCommand::Add(o) => run_add(o),
+            SubCommand::AddLocation(o) => run_add_location(o),
+            SubCommand::Console(o) => run_console(o),
+            SubCommand::Items(o) => run_items(o),
+            SubCommand::Locations(o) => run_locations(o),
+            SubCommand::Quickadd(o) => run_quickadd(o),
+        }
+    }
 }
 
 #[derive(Clap)]
@@ -72,9 +90,15 @@ impl CommonOpts {
         let store_path = match &self.store_path {
             Some(s) => s.clone(),
             None => {
-                let data_dir_path = dirs::data_dir().ok_or(anyhow!(
-                    "Could not determine your home directory; is $HOME set?"
-                ))?;
+                let data_dir_path = dirs::data_dir()
+                    .ok_or(anyhow!(
+                        "Could not determine your home directory; is $HOME set?"
+                    ))?
+                    .join("pachinko");
+
+                if !data_dir_path.is_dir() {
+                    std::fs::create_dir_all(&data_dir_path)?;
+                }
 
                 format!("{}/pachinko.qualia", data_dir_path.to_str().unwrap(),)
             }
@@ -396,11 +420,85 @@ fn run_items(opts: CommonOpts) -> AHResult<()> {
 }
 
 #[derive(Clap)]
-struct QuickaddOpts {
+struct ConsoleOpts {
+    #[clap(subcommand)]
+    subcmd: ConsoleSubCommand,
+}
+
+#[derive(Clap)]
+enum ConsoleSubCommand {
     #[clap(flatten)]
-    common: CommonOpts,
-    #[clap()]
-    location: ItemLocation,
+    Base(SubCommand),
+
+    #[clap(about = "Quit the console")]
+    Quit,
+}
+
+// trait print
+
+// let mut console_app = <ConsoleOpts as clap::IntoApp>::into_app();
+//     let mut subcommands: BTreeMap<String, &mut clap::App> = console_app
+//         .get_subcommands_mut()
+//         .filter_map(|subcommand| {
+//             if subcommand.get_name() != "console" {
+//                 Some((subcommand.get_name().to_string(), subcommand))
+//             } else {
+//                 None
+//             }
+//         })
+//         .collect();
+
+//     while let Ok(line) = rl.readline("pachinko> ") {
+//         eprintln!("parse result: {:#?}", ConsoleOpts::try_parse_from(vec!["pachinko", line.trim()])?;
+//         let console_opts = ConsoleOpts::try_parse_from(vec!["pachinko", line.trim()])?;
+
+//         match console_opts.subcmd {
+//             ConsoleSubCommand::Help => {
+//                 println!("Available commands:");
+
+//                 for subcommand in subcommands.values_mut() {
+//                     println!(
+//                         "{:12}  {}",
+//                         subcommand.get_name(),
+//                         subcommand.get_about().unwrap()
+//                     );
+//                 }
+//             }
+//             _ => {}
+//         }
+//     }
+
+fn run_console(opts: CommonOpts) -> AHResult<()> {
+    // Make sure the store can be opened before we try to run any commands.
+    opts.open_store().unwrap();
+
+    let mut rl = Editor::<()>::new();
+
+    while let Ok(line) = rl.readline("pachinko> ") {
+        let mut words = match shell_words::split(&line) {
+            Ok(w) => w,
+            Err(e) => {
+                println!("Error: {}", e);
+                continue;
+            }
+        };
+
+        words.insert(0, "pachinko".to_string());
+        let console_opts = ConsoleOpts::try_parse_from(words)?;
+
+        let result = match console_opts.subcmd {
+            ConsoleSubCommand::Quit => {
+                break;
+            }
+            ConsoleSubCommand::Base(sc) => sc.invoke(),
+        };
+
+        if let Err(e) = result {
+            println!("Error: {}", e);
+        }
+    }
+
+    Ok(())
 }
 
 fn run_locations(opts: CommonOpts) -> AHResult<()> {
@@ -423,6 +521,14 @@ fn run_locations(opts: CommonOpts) -> AHResult<()> {
     Ok(())
 }
 
+#[derive(Clap)]
+struct QuickaddOpts {
+    #[clap(flatten)]
+    common: CommonOpts,
+    #[clap()]
+    location: ItemLocation,
+}
+
 fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
     let mut store = opts.common.open_store()?;
 
@@ -436,7 +542,7 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
     };
     let prompt = location.get_str("location", "name")? + &bin_number_display + "> ";
 
-    let mut rl = rustyline::Editor::<()>::new();
+    let mut rl = Editor::<()>::new();
 
     while let Ok(line) = rl.readline(&prompt) {
         let mut name = line.trim().to_string();
@@ -460,13 +566,5 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
 }
 
 fn main() -> AHResult<()> {
-    let opt = Opts::parse();
-
-    match opt.subcmd {
-        SubCommand::Add(o) => run_add(o),
-        SubCommand::Items(o) => run_items(o),
-        SubCommand::AddLocation(o) => run_add_location(o),
-        SubCommand::Locations(o) => run_locations(o),
-        SubCommand::Quickadd(o) => run_quickadd(o),
-    }
+    Opts::parse().subcmd.invoke()
 }

@@ -11,6 +11,7 @@ impl TestContext {
 
         cmd.args(arguments)
             .current_dir(self.temp_dir.path())
+            .env("HOME", self.temp_dir.path())
             .env("PACHINKO_STORE_PATH", self.store_path());
 
         cmd
