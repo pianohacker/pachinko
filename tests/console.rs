@@ -3,7 +3,6 @@ mod common;
 use common::*;
 
 use rexpect::session::spawn_command;
-use rexpect::ReadUntil;
 
 #[test]
 fn console_has_help() -> rexpect::errors::Result<()> {

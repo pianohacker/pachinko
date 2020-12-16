@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-qualia = "0.3"
+qualia = "0.4"
 anyhow = "1.0" # Flexible concrete Error type built on std::error::Error
 clap = "3.0.0-beta.2"
 dirs = "1.0"

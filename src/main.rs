@@ -8,11 +8,11 @@
 
 use anyhow::{anyhow, bail, Context, Result as AHResult};
 use clap::{AppSettings, Clap};
-use qualia::query;
-use qualia::{Object, Store};
+use qualia::object;
+use qualia::{Object, Store, Q};
 use rustyline::Editor;
 use shell_words;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::env;
 
 trait ObjectGetHelpers {
@@ -218,16 +218,10 @@ impl WithCommonOpts for AddOpts {
 }
 
 fn _resolve_location(store: &Store, location: &ItemLocation) -> AHResult<Object> {
-    let matching_locations = store.query(Box::new(query::And(vec![
-        Box::new(query::PropEqual {
-            name: "type".to_string(),
-            value: "location".into(),
-        }),
-        Box::new(query::PropLike {
-            name: "name".to_string(),
-            value: location.location.clone().into(),
-        }),
-    ])));
+    let matching_locations = store.query(
+        Q.equal("type", "location")
+            .like("name", location.location.clone()),
+    );
 
     if matching_locations.len()? != 1 {
         bail!(
@@ -240,16 +234,7 @@ fn _resolve_location(store: &Store, location: &ItemLocation) -> AHResult<Object>
 }
 
 fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> {
-    let all_location_items = store.query(Box::new(query::And(vec![
-        Box::new(query::PropEqual {
-            name: "type".to_string(),
-            value: "item".into(),
-        }),
-        Box::new(query::PropEqual {
-            name: "location_id".to_string(),
-            value: location_id.into(),
-        }),
-    ])));
+    let all_location_items = store.query(Q.equal("type", "item").equal("location_id", location_id));
 
     let mut bin_fullnesses: HashMap<i64, i64> = (1..=num_bins).map(|bin_no| (bin_no, 0)).collect();
     all_location_items
@@ -310,14 +295,13 @@ fn _add_item(
 
     let location_id = location.get_number("location", "object-id")?;
 
-    let mut item = Object::new();
-    item.insert("type".to_string(), "item".to_string().into());
-    item.insert("name".to_string(), (&name).into());
-    item.insert("location_id".to_string(), location_id.into());
-    item.insert("bin_no".to_string(), bin_number.into());
-    item.insert("size".to_string(), size.to_string().into());
-
-    store.add(item)?;
+    store.add(object!(
+        "type" => "item",
+        "name" => (&name),
+        "location_id" => location_id,
+        "bin_no" => bin_number,
+        "size" => size.to_string(),
+    ))?;
 
     println!(
         "{}/{}: {} ({})",
@@ -367,12 +351,11 @@ impl WithCommonOpts for AddLocationOpts {
 fn run_add_location(opts: AddLocationOpts) -> AHResult<()> {
     let mut store = opts.common.open_store()?;
 
-    let mut location = Object::new();
-    location.insert("type".to_string(), "location".to_string().into());
-    location.insert("name".to_string(), opts.name.into());
-    location.insert("num_bins".to_string(), opts.num_bins?.into());
-
-    store.add(location)?;
+    store.add(object!(
+        "type" => "location",
+        "name" => opts.name,
+        "num_bins" => opts.num_bins?,
+    ))?;
 
     Ok(())
 }
@@ -381,16 +364,13 @@ fn run_items(opts: CommonOpts) -> AHResult<()> {
     let store = opts.open_store()?;
 
     let mut items = store
-        .query(Box::new(query::PropEqual {
-            name: "type".to_string(),
-            value: "item".into(),
-        }))
+        .query(Q.equal("type", "item"))
         .iter()?
         .map(|item| {
-            let matching_locations = store.query(Box::new(query::PropEqual {
-                name: "object-id".to_string(),
-                value: item.get_number("item", "location_id")?.into(),
-            }));
+            let matching_locations = store.query(
+                Q.equal("type", "location")
+                    .id(item.get_number("item", "location_id")?),
+            );
 
             if matching_locations.len()? != 1 {
                 bail!(
@@ -478,13 +458,7 @@ fn run_console(opts: CommonOpts) -> AHResult<()> {
 fn run_locations(opts: CommonOpts) -> AHResult<()> {
     let store = opts.open_store()?;
 
-    for location in store
-        .query(Box::new(query::PropEqual {
-            name: "type".to_string(),
-            value: "location".to_string().into(),
-        }))
-        .iter()?
-    {
+    for location in store.query(Q.equal("type", "location")).iter()? {
         println!(
             "{} ({} bins)",
             location.get_str("location", "name")?,
