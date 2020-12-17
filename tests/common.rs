@@ -1,5 +1,5 @@
 use predicates::prelude::*;
-pub use tempdir::TempDir;
+pub use tempfile::{Builder, TempDir};
 
 pub struct TestContext {
     pub temp_dir: TempDir,
@@ -77,7 +77,7 @@ impl CommandAssertHelpers for assert_cmd::assert::Assert {
 #[allow(unused_macros)]
 macro_rules! init {
     ($ctx:ident) => {
-        let temp_dir = TempDir::new("pachinko-cli").unwrap();
+        let temp_dir = Builder::new().prefix("pachinko-cli").tempdir().unwrap();
 
         let $ctx = TestContext { temp_dir };
     };

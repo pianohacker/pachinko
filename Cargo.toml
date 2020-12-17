@@ -4,8 +4,6 @@ version = "0.1.0"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 qualia = "0.4"
 anyhow = "1.0" # Flexible concrete Error type built on std::error::Error
@@ -19,4 +17,4 @@ shell-words = "1.0.0" # Process command line according to parsing rules of UNIX 
 assert_cmd = "1.0" # Test CLI Applications.
 predicates = "1.0"
 rexpect = "0.4"
-tempdir = "0.3" # A library for managing a temporary directory and deleting all contents when it's dropped.
+tempfile = "3.1" # A library for managing a temporary directory and deleting all contents when it's dropped.
