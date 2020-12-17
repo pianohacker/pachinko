@@ -388,7 +388,7 @@ fn run_items(opts: CommonOpts) -> AHResult<()> {
                 item.get_str("item", "size")?,
             ))
         })
-        .collect::<AHResult<Vec<(_, _, _, _)>>>()?;
+        .collect::<AHResult<Vec<_>>>()?;
 
     items.sort();
 
