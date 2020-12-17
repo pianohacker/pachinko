@@ -1,8 +1,10 @@
 [package]
 name = "pachinko"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 edition = "2018"
+description = "Physical item tracker and sorter"
+license = "MPL-2.0"
 
 [dependencies]
 qualia = "0.4"
