@@ -56,6 +56,9 @@ enum SubCommand {
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Run several commands from an interactive console")]
     Console(CommonOpts),
 
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Delete an item")]
+    Delete(DeleteOpts),
+
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing items")]
     Items(CommonOpts),
 
@@ -74,6 +77,7 @@ impl SubCommand {
         match self {
             SubCommand::Add(o) => run_add(o),
             SubCommand::AddLocation(o) => run_add_location(o),
+            SubCommand::Delete(o) => run_delete(o),
             SubCommand::Console(o) => run_console(o),
             SubCommand::Items(o) => run_items(o),
             SubCommand::Locations(o) => run_locations(o),
@@ -368,6 +372,45 @@ fn run_add_location(opts: AddLocationOpts) -> AHResult<()> {
     Ok(())
 }
 
+fn _format_items(
+    store: &Store,
+    items: &qualia::Collection,
+) -> AHResult<impl Iterator<Item = String>> {
+    let mut formatted_items = items
+        .iter()?
+        .map(|item| {
+            let matching_locations = store.query(
+                Q.equal("type", "location")
+                    .id(item.get_number("item", "location_id")?),
+            );
+
+            if matching_locations.len()? != 1 {
+                bail!(
+                    "location id \"{}\" did not match exactly one location",
+                    item.get_number("item", "location_id")?
+                );
+            }
+
+            let location = matching_locations.iter()?.next().unwrap();
+
+            Ok((
+                location.get_str("location", "name")?,
+                item.get_number("item", "bin_no")?,
+                item.get_str("item", "name")?,
+                item.get_str("item", "size")?,
+            ))
+        })
+        .collect::<AHResult<Vec<_>>>()?;
+
+    formatted_items.sort();
+
+    Ok(formatted_items
+        .into_iter()
+        .map(|(location_name, bin_number, name, size)| {
+            format!("{}/{}: {} ({})", location_name, bin_number, name, size)
+        }))
+}
+
 fn run_items(opts: CommonOpts) -> AHResult<()> {
     let store = opts.open_store()?;
 
@@ -400,8 +443,8 @@ fn run_items(opts: CommonOpts) -> AHResult<()> {
 
     items.sort();
 
-    for (location_name, bin_number, name, size) in items {
-        println!("{}/{}: {} ({})", location_name, bin_number, name, size,);
+    for formatted_item in _format_items(&store, &store.query(Q.equal("type", "item")))? {
+        println!("{}", formatted_item);
     }
 
     Ok(())
@@ -459,6 +502,50 @@ fn run_console(opts: CommonOpts) -> AHResult<()> {
             break;
         }
     }
+
+    Ok(())
+}
+
+#[derive(Clap)]
+struct DeleteOpts {
+    #[clap(flatten)]
+    common: CommonOpts,
+    #[clap(short, long)]
+    all: bool,
+    #[clap()]
+    name_pattern: String,
+}
+
+impl WithCommonOpts for DeleteOpts {
+    fn common_opts(&self) -> &CommonOpts {
+        &self.common
+    }
+}
+
+fn run_delete(opts: DeleteOpts) -> AHResult<()> {
+    let mut store = opts.common.open_store()?;
+
+    let checkpoint = store.checkpoint()?;
+    let matching_items = checkpoint.query(Q.equal("type", "item").like("name", &opts.name_pattern));
+
+    if matching_items.len()? > 1 && !opts.all {
+        let formatted_items: Vec<_> = _format_items(&checkpoint, &matching_items)?
+            .map(|item| format!("    {}", item))
+            .collect();
+
+        bail!(
+            "found multiple matching items (use --all to delete multiple items):\n{}",
+            formatted_items.join("\n")
+        );
+    }
+
+    for formatted_item in _format_items(&checkpoint, &matching_items)? {
+        println!("Deleted {}", formatted_item);
+    }
+
+    matching_items.delete()?;
+
+    checkpoint.commit(format!("delete items matching {}", &opts.name_pattern))?;
 
     Ok(())
 }
