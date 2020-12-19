@@ -14,6 +14,18 @@ fn adding_an_item_to_a_specified_bin() {
 }
 
 #[test]
+fn adding_an_item_should_be_undoable() {
+    init!(ctx);
+    ctx.populate();
+
+    ctx.assert_pch(&["add", "Test/4", "Test item"])
+        .only_stdout_contains("Test/4: Test item");
+    ctx.assert_pch(&["undo"])
+        .only_stdout_contains("Undid: add item Test item");
+    ctx.assert_pch(&["items"]).is_silent();
+}
+
+#[test]
 fn adding_an_item_should_match_locations_case_insensitively() {
     init!(ctx);
     ctx.populate();
@@ -65,4 +77,19 @@ Test/3: Test item.*
 Test/4: Test blight'em.*
 Test/4: Test item",
     );
+}
+
+#[test]
+fn items_should_be_deletable() {
+    init!(ctx);
+    ctx.populate();
+
+    ctx.assert_pch(&["add", "Test/4", "Test item"])
+        .only_stdout_contains("Test/4: Test item");
+    ctx.assert_pch(&["add", "Test/1", "Don't delete me"])
+        .only_stdout_contains("Test/1: Don't delete me");
+    ctx.assert_pch(&["delete Test"])
+        .only_stdout_contains("Deleted Test/4: Test item");
+    ctx.assert_pch(&["items"])
+        .only_stdout_matches("Test/4: Test item");
 }

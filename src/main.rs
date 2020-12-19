@@ -64,6 +64,9 @@ enum SubCommand {
 
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Quickly add several items to a location")]
     Quickadd(QuickaddOpts),
+
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Undo the last action")]
+    Undo(CommonOpts),
 }
 
 impl SubCommand {
@@ -75,6 +78,7 @@ impl SubCommand {
             SubCommand::Items(o) => run_items(o),
             SubCommand::Locations(o) => run_locations(o),
             SubCommand::Quickadd(o) => run_quickadd(o),
+            SubCommand::Undo(o) => run_undo(o),
         }
     }
 }
@@ -512,6 +516,17 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
             opts.location.bin,
             size,
         )?;
+    }
+
+    Ok(())
+}
+
+fn run_undo(opts: CommonOpts) -> AHResult<()> {
+    let mut store = opts.open_store()?;
+
+    match store.undo()? {
+        Some(description) => println!("Undid: {}", description),
+        None => println!("Nothing to undo"),
     }
 
     Ok(())
