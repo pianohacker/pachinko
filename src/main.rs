@@ -47,28 +47,28 @@ struct Opts {
 
 #[derive(Clap)]
 enum SubCommand {
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Add an item")]
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Add an item", visible_alias = "a")]
     Add(AddOpts),
 
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Add a location")]
     AddLocation(AddLocationOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Run several commands from an interactive console")]
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Run several commands from an interactive console", visible_alias = "c")]
     Console(CommonOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Delete an item")]
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Delete an item", visible_alias = "d")]
     Delete(DeleteOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing items")]
-    Items(CommonOpts),
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing items", visible_alias = "i")]
+    Items(ItemsOpts),
 
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing locations")]
     Locations(CommonOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Quickly add several items to a location")]
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Quickly add several items to a location", visible_alias = "qa")]
     Quickadd(QuickaddOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Undo the last action")]
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Undo the last action", visible_alias = "u")]
     Undo(CommonOpts),
 }
 
@@ -87,7 +87,7 @@ impl SubCommand {
     }
 }
 
-#[derive(Clap)]
+#[derive(Clap, Debug)]
 struct CommonOpts {
     #[clap(long, env = "PACHINKO_STORE_PATH")]
     store_path: Option<String>,
@@ -411,39 +411,30 @@ fn _format_items(
         }))
 }
 
-fn run_items(opts: CommonOpts) -> AHResult<()> {
-    let store = opts.open_store()?;
+#[derive(Clap, Debug)]
+struct ItemsOpts {
+    #[clap(flatten)]
+    common: CommonOpts,
+    #[clap()]
+    name_pattern: Option<String>,
+}
 
-    let mut items = store
-        .query(Q.equal("type", "item"))
-        .iter()?
-        .map(|item| {
-            let matching_locations = store.query(
-                Q.equal("type", "location")
-                    .id(item.get_number("item", "location_id")?),
-            );
+impl WithCommonOpts for ItemsOpts {
+    fn common_opts(&self) -> &CommonOpts {
+        &self.common
+    }
+}
 
-            if matching_locations.len()? != 1 {
-                bail!(
-                    "location id \"{}\" did not match exactly one location",
-                    item.get_number("item", "location_id")?
-                );
-            }
+fn run_items(opts: ItemsOpts) -> AHResult<()> {
+    let store = opts.common_opts().open_store()?;
 
-            let location = matching_locations.iter()?.next().unwrap();
+    let mut query = Q.equal("type", "item");
 
-            Ok((
-                location.get_str("location", "name")?,
-                item.get_number("item", "bin_no")?,
-                item.get_str("item", "name")?,
-                item.get_str("item", "size")?,
-            ))
-        })
-        .collect::<AHResult<Vec<_>>>()?;
+    if let Some(name_pattern) = opts.name_pattern {
+        query = query.like("name", &name_pattern);
+    }
 
-    items.sort();
-
-    for formatted_item in _format_items(&store, &store.query(Q.equal("type", "item")))? {
+    for formatted_item in _format_items(&store, &store.query(query))? {
         println!("{}", formatted_item);
     }
 
