@@ -295,13 +295,15 @@ fn _add_item(
 
     let location_id = location.get_number("location", "object-id")?;
 
-    store.add(object!(
+    let checkpoint = store.checkpoint()?;
+    checkpoint.add(object!(
         "type" => "item",
         "name" => (&name),
         "location_id" => location_id,
         "bin_no" => bin_number,
         "size" => size.to_string(),
     ))?;
+    checkpoint.commit(format!("add item {}", name))?;
 
     println!(
         "{}/{}: {} ({})",
@@ -351,11 +353,13 @@ impl WithCommonOpts for AddLocationOpts {
 fn run_add_location(opts: AddLocationOpts) -> AHResult<()> {
     let mut store = opts.common.open_store()?;
 
-    store.add(object!(
+    let checkpoint = store.checkpoint()?;
+    checkpoint.add(object!(
         "type" => "location",
-        "name" => opts.name,
+        "name" => &opts.name,
         "num_bins" => opts.num_bins?,
     ))?;
+    checkpoint.commit(format!("add location {}", &opts.name))?;
 
     Ok(())
 }
