@@ -9,33 +9,26 @@
 use anyhow::{anyhow, bail, Context, Result as AHResult};
 use clap::{AppSettings, Clap};
 use qualia::object;
-use qualia::{Object, Store, Q};
+use qualia::{Object, ObjectShape, Store, Q};
 use rustyline::Editor;
 use shell_words;
 use std::collections::HashMap;
 use std::env;
 
-trait ObjectGetHelpers {
-    fn get_str(&self, object_type: &str, field: &str) -> AHResult<String>;
-    fn get_number(&self, object_type: &str, field: &str) -> AHResult<i64>;
+#[derive(ObjectShape)]
+struct Item {
+    name: String,
+    location_id: i64,
+    bin_no: i64,
+    size: String,
 }
 
-impl ObjectGetHelpers for Object {
-    fn get_str(&self, object_type: &str, field: &str) -> AHResult<String> {
-        Ok(self
-            .get(field)
-            .ok_or(anyhow!("{} object missing {}", object_type, field))?
-            .as_str()
-            .ok_or(anyhow!("{} object's {} not a string", object_type, field))?
-            .clone())
-    }
-
-    fn get_number(&self, object_type: &str, field: &str) -> AHResult<i64> {
-        self.get(field)
-            .ok_or(anyhow!("{} object missing {}", object_type, field))?
-            .as_number()
-            .ok_or(anyhow!("{} object's {} not a number", object_type, field))
-    }
+#[derive(ObjectShape)]
+struct Location {
+    #[object_field("object-id")]
+    id: i64,
+    name: String,
+    num_bins: i64,
 }
 
 #[derive(Clap)]
@@ -225,7 +218,7 @@ impl WithCommonOpts for AddOpts {
     }
 }
 
-fn _resolve_location(store: &Store, location: &ItemLocation) -> AHResult<Object> {
+fn _resolve_location(store: &Store, location: &ItemLocation) -> AHResult<Location> {
     let matching_locations = store.query(
         Q.equal("type", "location")
             .like("name", location.location.clone()),
@@ -238,7 +231,7 @@ fn _resolve_location(store: &Store, location: &ItemLocation) -> AHResult<Object>
         );
     }
 
-    Ok(matching_locations.iter()?.next().unwrap())
+    Ok(matching_locations.iter_as()?.next().unwrap())
 }
 
 fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> {
@@ -246,12 +239,11 @@ fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> 
 
     let mut bin_fullnesses: HashMap<i64, i64> = (1..=num_bins).map(|bin_no| (bin_no, 0)).collect();
     all_location_items
-        .iter()?
+        .iter_as::<Item>()?
         .try_for_each(|item| -> AHResult<()> {
-            let bin_number = item.get_number("item", "bin_no")?;
-            let size: ItemSizeOpt = item.get_str("item", "size")?.parse::<ItemSizeOpt>()?;
+            let size: ItemSizeOpt = item.size.parse::<ItemSizeOpt>()?;
 
-            *bin_fullnesses.get_mut(&bin_number).unwrap() += i64::from(size);
+            *bin_fullnesses.get_mut(&item.bin_no).unwrap() += i64::from(size);
 
             Ok(())
         })?;
@@ -277,37 +269,29 @@ fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> 
 fn _add_item(
     store: &mut Store,
     name: String,
-    location: &Object,
+    location: &Location,
     bin_no: Option<i64>,
     size: ItemSizeOpt,
 ) -> AHResult<()> {
-    let num_bins = location.get_number("location", "num_bins")?;
-
     let bin_number = match bin_no {
         Some(n) => {
-            if n > num_bins {
+            if n > location.num_bins {
                 bail!(
                     "location {} only has {} bins",
-                    location.get_str("location", "name")?,
-                    num_bins
+                    location.name,
+                    location.num_bins
                 );
             }
             n
         }
-        None => _choose_bin(
-            &store,
-            location.get_number("location", "object-id")?,
-            num_bins,
-        )?,
+        None => _choose_bin(&store, location.id, location.num_bins)?,
     };
-
-    let location_id = location.get_number("location", "object-id")?;
 
     let checkpoint = store.checkpoint()?;
     checkpoint.add(object!(
         "type" => "item",
         "name" => (&name),
-        "location_id" => location_id,
+        "location_id" => location.id,
         "bin_no" => bin_number,
         "size" => size.to_string(),
     ))?;
@@ -315,7 +299,7 @@ fn _add_item(
 
     println!(
         "{}/{}: {} ({})",
-        location.get_str("location", "name")?,
+        location.name,
         bin_number,
         name,
         size.to_string(),
@@ -377,28 +361,20 @@ fn _format_items(
     items: &qualia::Collection,
 ) -> AHResult<impl Iterator<Item = String>> {
     let mut formatted_items = items
-        .iter()?
+        .iter_as::<Item>()?
         .map(|item| {
-            let matching_locations = store.query(
-                Q.equal("type", "location")
-                    .id(item.get_number("item", "location_id")?),
-            );
+            let matching_locations = store.query(Q.equal("type", "location").id(item.location_id));
 
             if matching_locations.len()? != 1 {
                 bail!(
                     "location id \"{}\" did not match exactly one location",
-                    item.get_number("item", "location_id")?
+                    item.location_id,
                 );
             }
 
-            let location = matching_locations.iter()?.next().unwrap();
+            let location = matching_locations.iter_as::<Location>()?.next().unwrap();
 
-            Ok((
-                location.get_str("location", "name")?,
-                item.get_number("item", "bin_no")?,
-                item.get_str("item", "name")?,
-                item.get_str("item", "size")?,
-            ))
+            Ok((location.name, item.bin_no, item.name, item.size))
         })
         .collect::<AHResult<Vec<_>>>()?;
 
@@ -544,12 +520,11 @@ fn run_delete(opts: DeleteOpts) -> AHResult<()> {
 fn run_locations(opts: CommonOpts) -> AHResult<()> {
     let store = opts.open_store()?;
 
-    for location in store.query(Q.equal("type", "location")).iter()? {
-        println!(
-            "{} ({} bins)",
-            location.get_str("location", "name")?,
-            location.get_number("location", "num_bins")?,
-        );
+    for location in store
+        .query(Q.equal("type", "location"))
+        .iter_as::<Location>()?
+    {
+        println!("{} ({} bins)", location.name, location.num_bins,);
     }
 
     Ok(())
@@ -574,7 +549,7 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
         Some(bin_no) => format!("/{}", bin_no),
         None => "".to_string(),
     };
-    let prompt = location.get_str("location", "name")? + &bin_number_display + "> ";
+    let prompt = location.name.clone() + &bin_number_display + "> ";
 
     let mut rl = Editor::<()>::new();
 
