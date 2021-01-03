@@ -6,30 +6,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod types;
+
 use anyhow::{anyhow, bail, Context, Result as AHResult};
 use clap::{AppSettings, Clap};
 use qualia::object;
-use qualia::{Object, ObjectShape, Store, Q};
+use qualia::{Object, Store, Q};
 use rustyline::Editor;
 use shell_words;
 use std::collections::HashMap;
 use std::env;
 
-#[derive(ObjectShape)]
-struct Item {
-    name: String,
-    location_id: i64,
-    bin_no: i64,
-    size: String,
-}
-
-#[derive(ObjectShape)]
-struct Location {
-    #[object_field("object-id")]
-    id: i64,
-    name: String,
-    num_bins: i64,
-}
+use crate::types::{parse_bin_number, Item, ItemLocation, ItemSize, Location};
 
 #[derive(Clap)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
@@ -113,93 +101,6 @@ trait WithCommonOpts {
     fn common_opts(&self) -> &CommonOpts;
 }
 
-fn parse_bin_number(s: &str) -> AHResult<i64> {
-    Ok(s.parse::<i64>()
-        .context("failed to parse bin number")
-        .and_then(|x| {
-            if x > 0 {
-                Ok(x)
-            } else {
-                Err(anyhow!("must be greater than zero"))
-            }
-        })?)
-}
-
-struct ItemLocation {
-    location: String,
-    bin: Option<i64>,
-}
-
-impl std::str::FromStr for ItemLocation {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> AHResult<Self> {
-        let parts: Vec<&str> = s.split("/").collect();
-
-        match parts.len() {
-            1 => Ok(Self {
-                location: parts[0].to_string(),
-                bin: None,
-            }),
-            2 => {
-                let bin_number = parse_bin_number(parts[1])?;
-
-                Ok(Self {
-                    location: parts[0].to_string(),
-                    bin: Some(bin_number),
-                })
-            }
-            _ => {
-                bail!("item location must be in format LOCATION or LOCATION/BIN");
-            }
-        }
-    }
-}
-
-#[derive(Clap)]
-#[clap(rename_all = "screaming_snake")]
-enum ItemSizeOpt {
-    S,
-    M,
-    L,
-    X,
-}
-
-impl std::str::FromStr for ItemSizeOpt {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> AHResult<Self> {
-        match s {
-            "S" => Ok(ItemSizeOpt::S),
-            "M" => Ok(ItemSizeOpt::M),
-            "L" => Ok(ItemSizeOpt::L),
-            "X" => Ok(ItemSizeOpt::X),
-            _ => Err(anyhow!("attempt to convert size from not \"[SMLX]\"")),
-        }
-    }
-}
-
-impl ToString for ItemSizeOpt {
-    fn to_string(&self) -> std::string::String {
-        match self {
-            ItemSizeOpt::S => "S",
-            ItemSizeOpt::M => "M",
-            ItemSizeOpt::L => "L",
-            ItemSizeOpt::X => "X",
-        }
-        .to_string()
-    }
-}
-
-impl From<ItemSizeOpt> for i64 {
-    fn from(size: ItemSizeOpt) -> i64 {
-        match size {
-            ItemSizeOpt::S => 2,
-            ItemSizeOpt::M => 3,
-            ItemSizeOpt::L => 4,
-            ItemSizeOpt::X => 6,
-        }
-    }
-}
-
 #[derive(Clap)]
 struct AddOpts {
     #[clap(flatten)]
@@ -209,7 +110,7 @@ struct AddOpts {
     #[clap()]
     name: String,
     #[clap(arg_enum, default_value = "S")]
-    size: ItemSizeOpt,
+    size: ItemSize,
 }
 
 impl WithCommonOpts for AddOpts {
@@ -241,7 +142,7 @@ fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> 
     all_location_items
         .iter_as::<Item>()?
         .try_for_each(|item| -> AHResult<()> {
-            let size: ItemSizeOpt = item.size.parse::<ItemSizeOpt>()?;
+            let size: ItemSize = item.size.parse::<ItemSize>()?;
 
             *bin_fullnesses.get_mut(&item.bin_no).unwrap() += i64::from(size);
 
@@ -271,7 +172,7 @@ fn _add_item(
     name: String,
     location: &Location,
     bin_no: Option<i64>,
-    size: ItemSizeOpt,
+    size: ItemSize,
 ) -> AHResult<()> {
     let bin_number = match bin_no {
         Some(n) => {
@@ -298,11 +199,14 @@ fn _add_item(
     checkpoint.commit(format!("add item {}", name))?;
 
     println!(
-        "{}/{}: {} ({})",
-        location.name,
-        bin_number,
-        name,
-        size.to_string(),
+        "{}",
+        Item {
+            location_id: location.id,
+            bin_no: bin_number,
+            name,
+            size: size.to_string(),
+        }
+        .format_with_store(store)?
     );
 
     Ok(())
@@ -359,32 +263,14 @@ fn run_add_location(opts: AddLocationOpts) -> AHResult<()> {
 fn _format_items(
     store: &Store,
     items: &qualia::Collection,
-) -> AHResult<impl Iterator<Item = String>> {
+) -> AHResult<impl Iterator<Item = impl std::fmt::Display>> {
     let mut formatted_items = items
         .iter_as::<Item>()?
-        .map(|item| {
-            let matching_locations = store.query(Q.equal("type", "location").id(item.location_id));
-
-            if matching_locations.len()? != 1 {
-                bail!(
-                    "location id \"{}\" did not match exactly one location",
-                    item.location_id,
-                );
-            }
-
-            let location = matching_locations.iter_as::<Location>()?.next().unwrap();
-
-            Ok((location.name, item.bin_no, item.name, item.size))
-        })
+        .map(|item| item.format_with_store(store))
         .collect::<AHResult<Vec<_>>>()?;
-
     formatted_items.sort();
 
-    Ok(formatted_items
-        .into_iter()
-        .map(|(location_name, bin_number, name, size)| {
-            format!("{}/{}: {} ({})", location_name, bin_number, name, size)
-        }))
+    Ok(formatted_items.into_iter())
 }
 
 #[derive(Clap, Debug)]
@@ -524,7 +410,11 @@ fn run_locations(opts: CommonOpts) -> AHResult<()> {
         .query(Q.equal("type", "location"))
         .iter_as::<Location>()?
     {
-        println!("{} ({} bins)", location.name, location.num_bins,);
+        if location.num_bins > 1 {
+            println!("{} ({} bins)", location.name, location.num_bins);
+        } else {
+            println!("{}", location.name);
+        }
     }
 
     Ok(())
@@ -555,7 +445,7 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
 
     while let Ok(line) = rl.readline(&prompt) {
         let mut name = line.trim().to_string();
-        let mut size = ItemSizeOpt::S;
+        let mut size = ItemSize::S;
 
         if let Some(cap) = regex::Regex::new(r"^(.*?)\s+([SMLX])$")?.captures(line.trim()) {
             name = cap[1].to_string();

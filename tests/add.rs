@@ -14,6 +14,17 @@ fn adding_an_item_to_a_specified_bin() {
 }
 
 #[test]
+fn adding_an_item_to_a_single_bin_location_should_omit_bin() {
+    init!(ctx);
+    ctx.populate();
+
+    ctx.assert_pch(&["add", "Tiny", "Test item"])
+        .only_stdout_contains("Tiny: Test item");
+    ctx.assert_pch(&["items"])
+        .only_stdout_contains("Tiny: Test item");
+}
+
+#[test]
 fn adding_an_item_should_be_undoable() {
     init!(ctx);
     ctx.populate();

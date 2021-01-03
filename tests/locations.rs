@@ -19,6 +19,15 @@ fn an_added_location_should_be_visible() {
 }
 
 #[test]
+fn an_added_location_with_one_bin_should_not_include_bins() {
+    init!(ctx);
+
+    ctx.assert_pch(&["add-location", "Test", "1"]).is_silent();
+    ctx.assert_pch(&["locations"])
+        .only_stdout_matches("^Test\n");
+}
+
+#[test]
 fn creating_a_location_with_an_invalid_number_of_bins_should_fail() {
     init!(ctx);
     ctx.populate();
