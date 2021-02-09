@@ -2,6 +2,12 @@
 
 Pachinko is a simple CLI for managing collections of physical things.
 
+# Installation
+
+```console
+$ cargo install pachinko
+```
+
 # Usage
 
 Track what items you keep in a set of different locations:
@@ -34,9 +40,3 @@ Drawers/2: Laser Pointer (S)
 
 If you tell Pachinko that a location has a certain number of bins (2, in the above example) it will
 automatically assign each new item to the least-full bin.
-
-# Installation
-
-```console
-$ cargo install pachinko
-```
