@@ -13,8 +13,8 @@ important papers around has run into something like the following:
 * "... now I have a document showing that I paid tuition last year, which I need to keep for this
   deduction... does it go in the 'Taxes' or 'College' folder?"
 
-Librarians have struggled for centuries to come up with a Perfect Information Hierarchy, and they're
-still arguing about it. I know I'm not going to be the genius that cracks the code, and worse, it's
+Librarians have struggled for centuries to come up with a Perfect Information Hierarchy and they're
+still arguing about it. I know I'm not going to be the genius that cracks the code. Worse, it's
 utterly unnecessary.
 
 Two things really matter for important stuff:
@@ -36,16 +36,16 @@ The first version used a content-addressed hash identifier for each item. The ho
 
 * It was too hard to come up with a hashing scheme that wasn't sensitive to word order or spelling.
 * The first digit of the resulting hash was used to pick a folder. This meant that folder
-    assignment was effectively random, and meant some folders were left uselessly empty.  
+    assignment was effectively random and meant some folders were left uselessly empty.  
 * The hex IDs were unwieldy. I tried several pronounceable-hash systems before giving up.
 
 #### Web UI
 The second version was a web UI with two big changes:
   * The content-aware hashes were completely abandoned. Picking items with a UI meant that their ID
     wasn't all that important.
-  * Items' size was recorded, and new items were assigned a bin based on how full each bin was.
+  * Items' size was recorded and new items were assigned a bin based on how full each bin was.
 
-This was far more effective, and worked well for both paper in filing cabinet and random junk in a
+This was far more effective and worked well for both paper in filing cabinet and random junk in a
 set of boxes.
 
 I only abandoned this version because maintaining a webapp is a grueling treadmill. I also didn't
@@ -55,11 +55,16 @@ want to implement authentication. I refuse to deal with oAuth without a paycheck
 
 Pachinko, the third version of this concept, had a few goals:
 
-- Be a CLI. Web UIs have a ton of advantages, but I don't have the spare time to keep my nose to the
+* Be a CLI. Web UIs have a ton of advantages, but I don't have the spare time to keep my nose to the
   webpack/React/Flux/Immer/Express/GraphQL/etc. grindstone anymore.
-- As a CLI, be built in Rust. Most of my previous CLIs had been written in Python. I love Python
+* As a CLI, be built in Rust. Most of my previous CLIs had been written in Python. I love Python
   deeply, but its startup delay is super painful for a non-interactive CLI. Plus I really wanted to
 learn Rust.
-- Be an early adopter of my SQlite-based document store,
+* Be an early adopter of my SQlite-based document store,
   [Qualia](https://github.com/pianohacker/qualia). Qualia began as a metadata-based tracker for
-**computer** files, and its store ended up being the most interesting piece.
+**computer** files and its store ended up being the most interesting piece.
+
+Besides that, it should address these needs:
+
+* Keep track of my possessions, for renters insurance.
+* 
