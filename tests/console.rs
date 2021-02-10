@@ -95,3 +95,25 @@ fn console_continues_after_bad_commands() -> rexpect::errors::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn console_does_not_crash_with_empty_input() -> rexpect::errors::Result<()> {
+    init!(ctx);
+    ctx.populate();
+
+    let mut p = spawn_command(ctx.pch_cmd(&["console"]), Some(1000))?;
+
+    p.exp_string("pachinko> ")?;
+    p.send_line("")?;
+
+    p.exp_string("pachinko> ")?;
+    p.send_line("  ")?;
+
+    p.exp_string("pachinko> ")?;
+    p.send_line(" \"\"")?;
+
+    p.exp_string("pachinko> ")?;
+    p.process.exit()?;
+
+    Ok(())
+}

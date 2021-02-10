@@ -329,6 +329,10 @@ fn run_console(opts: CommonOpts) -> AHResult<()> {
         let continue_console = || -> AHResult<bool> {
             let words = shell_words::split(&line)?;
 
+            if words.len() == 0 {
+                return Ok(true);
+            }
+
             if words[0] == "help" {
                 <ConsoleOpts as clap::IntoApp>::into_app()
                     .help_template("Available commands:\n{subcommands}")
