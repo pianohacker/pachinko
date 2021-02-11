@@ -1,7 +1,7 @@
 [package]
 name = "pachinko"
 description = "Physical item tracker and sorter"
-version = "0.4.0"
+version = "0.4.1"
 
 repository = "https://github.com/pianohacker/qualia"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
