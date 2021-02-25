@@ -6,18 +6,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod console;
 mod types;
+mod utils;
 
 use anyhow::{anyhow, bail, Context, Result as AHResult};
-use clap::{AppSettings, Clap};
+use clap::Clap;
 use qualia::object;
 use qualia::{Object, Store, Q};
 use rustyline::Editor;
-use shell_words;
-use std::collections::HashMap;
 use std::env;
 
+use crate::console::run_console;
 use crate::types::{parse_bin_number, Item, ItemLocation, ItemSize, Location};
+use crate::utils::add_item;
 
 #[derive(Clap)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
@@ -135,83 +137,6 @@ fn _resolve_location(store: &Store, location: &ItemLocation) -> AHResult<Locatio
     Ok(matching_locations.iter_as()?.next().unwrap())
 }
 
-fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> {
-    let all_location_items = store.query(Q.equal("type", "item").equal("location_id", location_id));
-
-    let mut bin_fullnesses: HashMap<i64, i64> = (1..=num_bins).map(|bin_no| (bin_no, 0)).collect();
-    all_location_items
-        .iter_as::<Item>()?
-        .try_for_each(|item| -> AHResult<()> {
-            let size: ItemSize = item.size.parse::<ItemSize>()?;
-
-            *bin_fullnesses.get_mut(&item.bin_no).unwrap() += i64::from(size);
-
-            Ok(())
-        })?;
-
-    let min_fullness = bin_fullnesses
-        .iter()
-        .map(|(_, fullness)| fullness)
-        .min()
-        .unwrap_or(&0);
-
-    Ok((1..=num_bins)
-        .filter_map(|bin_no| {
-            if bin_fullnesses[&bin_no] <= *min_fullness {
-                Some(bin_no)
-            } else {
-                None
-            }
-        })
-        .next()
-        .unwrap())
-}
-
-fn _add_item(
-    store: &mut Store,
-    name: String,
-    location: &Location,
-    bin_no: Option<i64>,
-    size: ItemSize,
-) -> AHResult<()> {
-    let bin_number = match bin_no {
-        Some(n) => {
-            if n > location.num_bins {
-                bail!(
-                    "location {} only has {} bins",
-                    location.name,
-                    location.num_bins
-                );
-            }
-            n
-        }
-        None => _choose_bin(&store, location.id, location.num_bins)?,
-    };
-
-    let checkpoint = store.checkpoint()?;
-    checkpoint.add(object!(
-        "type" => "item",
-        "name" => (&name),
-        "location_id" => location.id,
-        "bin_no" => bin_number,
-        "size" => size.to_string(),
-    ))?;
-    checkpoint.commit(format!("add item {}", name))?;
-
-    println!(
-        "{}",
-        Item {
-            location_id: location.id,
-            bin_no: bin_number,
-            name,
-            size: size.to_string(),
-        }
-        .format_with_store(store)?
-    );
-
-    Ok(())
-}
-
 fn run_add(opts: AddOpts) -> AHResult<()> {
     let mut store = opts.common.open_store()?;
 
@@ -219,7 +144,7 @@ fn run_add(opts: AddOpts) -> AHResult<()> {
 
     let location = _resolve_location(&store, &opts.location)?;
 
-    _add_item(
+    add_item(
         &mut store,
         opts.name,
         &location,
@@ -298,66 +223,6 @@ fn run_items(opts: ItemsOpts) -> AHResult<()> {
 
     for formatted_item in _format_items(&store, &store.query(query))? {
         println!("{}", formatted_item);
-    }
-
-    Ok(())
-}
-
-#[derive(Clap)]
-#[clap(setting = AppSettings::NoBinaryName)]
-struct ConsoleOpts {
-    #[clap(subcommand)]
-    subcmd: ConsoleSubCommand,
-}
-
-#[derive(Clap)]
-enum ConsoleSubCommand {
-    #[clap(flatten)]
-    Base(SubCommand),
-
-    #[clap(about = "Quit the console")]
-    Quit,
-}
-
-fn run_console(opts: CommonOpts) -> AHResult<()> {
-    // Make sure the store can be opened before we try to run any commands.
-    opts.open_store().unwrap();
-
-    let mut rl = Editor::<()>::new();
-
-    while let Ok(line) = rl.readline("pachinko> ") {
-        let continue_console = || -> AHResult<bool> {
-            let words = shell_words::split(&line)?;
-
-            if words.len() == 0 {
-                return Ok(true);
-            }
-
-            if words[0] == "help" {
-                <ConsoleOpts as clap::IntoApp>::into_app()
-                    .help_template("Available commands:\n{subcommands}")
-                    .print_help()?;
-
-                return Ok(true);
-            }
-
-            let console_opts = ConsoleOpts::try_parse_from(words)?;
-
-            match console_opts.subcmd {
-                ConsoleSubCommand::Quit => Ok(false),
-                ConsoleSubCommand::Base(SubCommand::Console(_)) => Ok(true),
-                ConsoleSubCommand::Base(sc) => sc.invoke().map(|_| true),
-            }
-        }()
-        .unwrap_or_else(|e| {
-            println!("Error: {}", e);
-
-            true
-        });
-
-        if !continue_console {
-            break;
-        }
     }
 
     Ok(())
@@ -456,7 +321,7 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
             size = cap[2].parse()?;
         }
 
-        _add_item(
+        add_item(
             &mut store,
             name.to_string(),
             &location,
