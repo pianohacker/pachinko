@@ -124,7 +124,10 @@ fn filter_and_format_candidates(candidates: Vec<String>, input: &InputWord) -> V
     let mut result = candidates
         .iter()
         .filter_map(|candidate| {
-            if candidate.starts_with(&input.word) {
+            if candidate
+                .to_lowercase()
+                .starts_with(&input.word.to_lowercase())
+            {
                 Some(quote(candidate, input.delimiters.clone()))
             } else {
                 None
@@ -148,6 +151,13 @@ impl<'store> ConsoleHelper<'store> {
                 .store
                 .query(Q.equal("type", "item"))
                 .iter_as::<crate::types::Item>()
+                .unwrap()
+                .map(|item| item.name)
+                .collect(),
+            "location" => self
+                .store
+                .query(Q.equal("type", "location"))
+                .iter_as::<crate::types::Location>()
                 .unwrap()
                 .map(|item| item.name)
                 .collect(),
@@ -502,7 +512,7 @@ mod tests {
         checkpoint
             .add(object!(
                 "type" => "item",
-                "name" => "abc",
+                "name" => "Abc",
                 "location_id" => 0,
                 "bin_no" => 0,
                 "size" => "S",
@@ -532,7 +542,36 @@ mod tests {
 
         assert_eq!(
             helper.completion_candidates(&vec![word!(0, "delete"), word!(7, "a")]),
-            vec!["aaa".to_string(), "abc".to_string()],
+            vec!["Abc".to_string(), "aaa".to_string()],
+        );
+    }
+
+    #[test]
+    fn completion_candidates_completes_location_names() {
+        let (_temp_dir, mut store) = open_test_store();
+
+        let checkpoint = store.checkpoint().unwrap();
+        checkpoint
+            .add(object!(
+                "type" => "location",
+                "name" => "loc1",
+                "num_bins" => 1,
+            ))
+            .unwrap();
+        checkpoint
+            .add(object!(
+                "type" => "location",
+                "name" => "Loc2",
+                "num_bins" => 1,
+            ))
+            .unwrap();
+        checkpoint.commit("").unwrap();
+
+        let helper = &ConsoleHelper { store: &store };
+
+        assert_eq!(
+            helper.completion_candidates(&vec![word!(0, "add"), word!(4, "l")]),
+            vec!["Loc2".to_string(), "loc1".to_string()],
         );
     }
 
