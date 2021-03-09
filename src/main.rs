@@ -42,6 +42,9 @@ enum SubCommand {
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Delete an item", visible_alias = "d")]
     Delete(DeleteOpts),
 
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Dump database contents")]
+    Dump(CommonOpts),
+
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing items", visible_alias = "i")]
     Items(ItemsOpts),
 
@@ -61,6 +64,7 @@ impl SubCommand {
             SubCommand::Add(o) => run_add(o),
             SubCommand::AddLocation(o) => run_add_location(o),
             SubCommand::Delete(o) => run_delete(o),
+            SubCommand::Dump(o) => run_dump(o),
             SubCommand::Console(o) => run_console(o),
             SubCommand::Items(o) => run_items(o),
             SubCommand::Locations(o) => run_locations(o),
@@ -181,6 +185,14 @@ fn run_add_location(opts: AddLocationOpts) -> AHResult<()> {
         "num_bins" => opts.num_bins?,
     ))?;
     checkpoint.commit(format!("add location {}", &opts.name))?;
+
+    Ok(())
+}
+
+fn run_dump(opts: CommonOpts) -> AHResult<()> {
+    let store = opts.open_store()?;
+
+    serde_json::to_writer(std::io::stdout(), &store.all().iter()?.collect::<Vec<_>>())?;
 
     Ok(())
 }

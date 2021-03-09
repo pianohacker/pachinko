@@ -15,7 +15,9 @@ clap = "3.0.0-beta.2"
 dirs = "1.0"
 rustyline = "7.0" # Rustyline, a readline implementation based on Antirez's Linenoise
 regex = "1.4" # An implementation of regular expressions for Rust. This implementation uses finite automata and gua…
-shell-words = "1.0.0" # Process command line according to parsing rules of UNIX shell
+serde = "1.0" # A generic serialization/deserialization framework
+serde_json = "1.0" # A JSON serialization file format
+shell-words = "1.0" # Process command line according to parsing rules of UNIX shell
 
 [dev-dependencies]
 assert_cmd = "1.0" # Test CLI Applications.

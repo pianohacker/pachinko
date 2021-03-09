@@ -448,6 +448,8 @@ dependencies = [
  "regex",
  "rexpect",
  "rustyline",
+ "serde",
+ "serde_json",
  "shell-words",
  "tempfile",
 ]
