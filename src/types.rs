@@ -1,12 +1,22 @@
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
-use qualia::{object, ObjectShape, Store, Q};
+use qualia::{object, ObjectShape, Store};
 
 use crate::AHResult;
 
 #[derive(ObjectShape)]
+#[fixed_fields("type" => "location")]
+pub struct Location {
+    pub object_id: Option<i64>,
+    pub name: String,
+    pub num_bins: i64,
+}
+
+#[derive(ObjectShape)]
+#[fixed_fields("type" => "item")]
 pub struct Item {
     pub name: String,
+    #[related(Location)]
     pub location_id: i64,
     pub bin_no: i64,
     pub size: String,
@@ -14,16 +24,8 @@ pub struct Item {
 
 impl Item {
     pub fn format_with_store(&self, store: &Store) -> AHResult<FormattedItem> {
-        let matching_locations = store.query(Q.equal("type", "location").id(self.location_id));
+        let location = self.fetch_location(store)?;
 
-        if matching_locations.len()? != 1 {
-            bail!(
-                "location id \"{}\" did not match exactly one location",
-                self.location_id,
-            );
-        }
-
-        let location = matching_locations.iter_as::<Location>()?.next().unwrap();
         let bin_no = if location.num_bins > 1 {
             Some(self.bin_no)
         } else {
@@ -144,12 +146,4 @@ impl From<ItemSize> for i64 {
             ItemSize::X => 6,
         }
     }
-}
-
-#[derive(ObjectShape)]
-pub struct Location {
-    #[object_field("object-id")]
-    pub id: i64,
-    pub name: String,
-    pub num_bins: i64,
 }

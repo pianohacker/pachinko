@@ -480,6 +480,7 @@ mod tests {
                 "console".to_string(),
                 "delete".to_string(),
                 "dump".to_string(),
+                "editor".to_string(),
                 "items".to_string(),
                 "locations".to_string(),
                 "quickadd".to_string(),

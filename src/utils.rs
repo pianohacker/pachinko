@@ -55,14 +55,14 @@ pub fn add_item(
             }
             n
         }
-        None => _choose_bin(&store, location.id, location.num_bins)?,
+        None => _choose_bin(&store, location.object_id.unwrap(), location.num_bins)?,
     };
 
     let checkpoint = store.checkpoint()?;
     checkpoint.add(object!(
         "type" => "item",
         "name" => (&name),
-        "location_id" => location.id,
+        "location_id" => location.object_id.unwrap(),
         "bin_no" => bin_number,
         "size" => size.to_string(),
     ))?;
@@ -71,7 +71,7 @@ pub fn add_item(
     println!(
         "{}",
         Item {
-            location_id: location.id,
+            location_id: location.object_id.unwrap(),
             bin_no: bin_number,
             name,
             size: size.to_string(),

@@ -7,6 +7,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod console;
+mod editor;
 mod types;
 mod utils;
 
@@ -18,6 +19,7 @@ use rustyline::Editor;
 use std::env;
 
 use crate::console::run_console;
+use crate::editor::run_editor;
 use crate::types::{parse_bin_number, Item, ItemLocation, ItemSize, Location};
 use crate::utils::add_item;
 
@@ -45,6 +47,9 @@ enum SubCommand {
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Dump database contents")]
     Dump(CommonOpts),
 
+    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Edit and view items", visible_alias = "qa")]
+    Editor(CommonOpts),
+
     #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing items", visible_alias = "i")]
     Items(ItemsOpts),
 
@@ -66,6 +71,7 @@ impl SubCommand {
             SubCommand::Delete(o) => run_delete(o),
             SubCommand::Dump(o) => run_dump(o),
             SubCommand::Console(o) => run_console(o),
+            SubCommand::Editor(o) => run_editor(o),
             SubCommand::Items(o) => run_items(o),
             SubCommand::Locations(o) => run_locations(o),
             SubCommand::Quickadd(o) => run_quickadd(o),

@@ -9,7 +9,7 @@ edition = "2018"
 license = "MPL-2.0"
 
 [dependencies]
-qualia = "0.7"
+qualia = "0.12"
 anyhow = "1.0" # Flexible concrete Error type built on std::error::Error
 clap = "3.0.0-beta.2"
 dirs = "1.0"
@@ -18,6 +18,9 @@ regex = "1.4" # An implementation of regular expressions for Rust. This implemen
 serde = "1.0" # A generic serialization/deserialization framework
 serde_json = "1.0" # A JSON serialization file format
 shell-words = "1.0" # Process command line according to parsing rules of UNIX shell
+tui = "0.17.0"
+crossterm = "0.23.1"
+ctrlc = { version = "3.2.1", features = ["termination"] }
 
 [dev-dependencies]
 assert_cmd = "1.0" # Test CLI Applications.

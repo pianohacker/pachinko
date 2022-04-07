@@ -60,25 +60,25 @@ fn can_dump_items() {
             r#"
 [
     {
-        "object-id": 1,
+        "object_id": 1,
         "name": "Test",
         "num_bins": 4,
         "type": "location"
     },
     {
-        "object-id": 2,
+        "object_id": 2,
         "name": "Tiny",
         "num_bins": 1,
         "type": "location"
     },
     {
-        "object-id": 3,
+        "object_id": 3,
         "name": "Huge",
         "num_bins": 16,
         "type": "location"
     },
     {
-        "object-id": 4,
+        "object_id": 4,
         "bin_no": 4,
         "location_id": 1,
         "name": "Test item",
@@ -86,7 +86,7 @@ fn can_dump_items() {
         "type": "item"
     },
     {
-        "object-id": 5,
+        "object_id": 5,
         "bin_no": 6,
         "location_id": 3,
         "name": "Huge item",
@@ -94,7 +94,7 @@ fn can_dump_items() {
         "type": "item"
     },
     {
-        "object-id": 6,
+        "object_id": 6,
         "bin_no": 4,
         "location_id": 1,
         "name": "Test blight'em",
