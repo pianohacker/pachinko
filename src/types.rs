@@ -49,15 +49,25 @@ pub struct FormattedItem {
     pub size: String,
 }
 
-impl std::fmt::Display for FormattedItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        let item_location = if let Some(bin_no) = self.bin_no {
+impl FormattedItem {
+    pub fn format_location(&self) -> String {
+        if let Some(bin_no) = self.bin_no {
             format!("{}/{}", self.location_name, bin_no)
         } else {
             self.location_name.clone()
-        };
+        }
+    }
+}
 
-        write!(f, "{}: {} ({})", item_location, self.name, self.size)
+impl std::fmt::Display for FormattedItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "{}: {} ({})",
+            self.format_location(),
+            self.name,
+            self.size
+        )
     }
 }
 
