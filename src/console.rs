@@ -150,7 +150,7 @@ impl<'store> ConsoleHelper<'store> {
             "name-pattern" => self
                 .store
                 .query(Q.equal("type", "item"))
-                .iter_as::<crate::types::Item>()
+                .iter_converted::<crate::types::Item>(&self.store)
                 .unwrap()
                 .map(|item| item.name)
                 .collect(),
@@ -291,9 +291,11 @@ pub(crate) fn run_console(opts: CommonOpts) -> AHResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::types::Location;
+
     use super::*;
 
-    use qualia::{object, Object};
+    use qualia::{object, Object, ObjectShapeWithId};
     use tempfile::{Builder, TempDir};
 
     macro_rules! word {
@@ -511,11 +513,17 @@ mod tests {
         let (_temp_dir, mut store) = open_test_store();
 
         let checkpoint = store.checkpoint().unwrap();
+        let mut location = Location {
+            object_id: None,
+            name: "location".to_string(),
+            num_bins: 1,
+        };
+        checkpoint.add_with_id(&mut location).unwrap();
         checkpoint
             .add(object!(
                 "type" => "item",
                 "name" => "Abc",
-                "location_id" => 0,
+                "location_id" => location.get_object_id().unwrap(),
                 "bin_no" => 0,
                 "size" => "S",
             ))
@@ -524,7 +532,7 @@ mod tests {
             .add(object!(
                 "type" => "item",
                 "name" => "aaa",
-                "location_id" => 0,
+                "location_id" => location.get_object_id().unwrap(),
                 "bin_no" => 0,
                 "size" => "S",
             ))
@@ -533,7 +541,7 @@ mod tests {
             .add(object!(
                 "type" => "item",
                 "name" => "def",
-                "location_id" => 0,
+                "location_id" => location.get_object_id().unwrap(),
                 "bin_no" => 0,
                 "size" => "S",
             ))
@@ -581,11 +589,17 @@ mod tests {
         let (_temp_dir, mut store) = open_test_store();
 
         let checkpoint = store.checkpoint().unwrap();
+        let mut location = Location {
+            object_id: None,
+            name: "location".to_string(),
+            num_bins: 1,
+        };
+        checkpoint.add_with_id(&mut location).unwrap();
         checkpoint
             .add(object!(
                 "type" => "item",
                 "name" => "space abc",
-                "location_id" => 0,
+                "location_id" => location.get_object_id().unwrap(),
                 "bin_no" => 0,
                 "size" => "S",
             ))

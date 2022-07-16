@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
-use qualia::{object, ObjectShape, Store};
+use qualia::{object, ObjectShape, ObjectShapeWithId, Queryable, Store};
 
 use crate::AHResult;
 
-#[derive(ObjectShape)]
+#[derive(Clone, ObjectShape)]
 #[fixed_fields("type" => "location")]
 pub struct Location {
     pub object_id: Option<i64>,
@@ -16,24 +16,21 @@ pub struct Location {
 #[fixed_fields("type" => "item")]
 pub struct Item {
     pub name: String,
-    #[related(Location)]
-    pub location_id: i64,
+    pub location: Location,
     pub bin_no: i64,
     pub size: String,
 }
 
 impl Item {
     pub fn format_with_store(&self, store: &Store) -> AHResult<FormattedItem> {
-        let location = self.fetch_location(store)?;
-
-        let bin_no = if location.num_bins > 1 {
+        let bin_no = if self.location.num_bins > 1 {
             Some(self.bin_no)
         } else {
             None
         };
 
         Ok(FormattedItem {
-            location_name: location.name,
+            location_name: self.location.name.clone(),
             bin_no,
             name: self.name.clone(),
             size: self.size.clone(),

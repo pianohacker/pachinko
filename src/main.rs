@@ -208,7 +208,7 @@ fn _format_items(
     items: &qualia::Collection,
 ) -> AHResult<impl Iterator<Item = impl std::fmt::Display>> {
     let mut formatted_items = items
-        .iter_as::<Item>()?
+        .iter_converted::<Item>(&store)?
         .map(|item| item.format_with_store(store))
         .collect::<AHResult<Vec<_>>>()?;
     formatted_items.sort();

@@ -1,4 +1,5 @@
 mod app;
+mod sheet;
 
 use crossterm::{
     event::{self, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},

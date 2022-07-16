@@ -10,7 +10,7 @@ fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> 
 
     let mut bin_fullnesses: HashMap<i64, i64> = (1..=num_bins).map(|bin_no| (bin_no, 0)).collect();
     all_location_items
-        .iter_as::<Item>()?
+        .iter_converted::<Item>(&store)?
         .try_for_each(|item| -> AHResult<()> {
             let size: ItemSize = item.size.parse::<ItemSize>()?;
 
@@ -71,7 +71,7 @@ pub fn add_item(
     println!(
         "{}",
         Item {
-            location_id: location.object_id.unwrap(),
+            location: location.clone(),
             bin_no: bin_number,
             name,
             size: size.to_string(),
