@@ -22,19 +22,23 @@ pub struct Item {
 }
 
 impl Item {
-    pub fn format_with_store(&self, store: &Store) -> AHResult<FormattedItem> {
+    pub fn format(&self) -> FormattedItem {
         let bin_no = if self.location.num_bins > 1 {
             Some(self.bin_no)
         } else {
             None
         };
 
-        Ok(FormattedItem {
+        FormattedItem {
             location_name: self.location.name.clone(),
             bin_no,
             name: self.name.clone(),
             size: self.size.clone(),
-        })
+        }
+    }
+
+    pub fn format_with_store(&self, store: &Store) -> AHResult<FormattedItem> {
+        Ok(self.format())
     }
 }
 

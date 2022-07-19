@@ -6,8 +6,10 @@ use std::{
     },
 };
 
-use crossterm::event::{Event, KeyCode};
-use qualia::{query::QueryNode, CachedCollection, Object, ObjectShape, Queryable, Store, Q};
+use crossterm::event::{Event, KeyCode, KeyModifiers};
+use qualia::{
+    query::QueryNode, CachedMapping, CheckpointId, Object, ObjectShape, Queryable, Store, Q,
+};
 use tui::{
     backend::Backend,
     buffer::Buffer,
@@ -25,7 +27,10 @@ use super::sheet::{Row, Sheet, SheetState};
 
 pub struct App {
     store: Store,
+    items: Vec<Item>,
+    last_updated_checkpoint: CheckpointId,
     running: Arc<AtomicBool>,
+    filter: String,
     editor_table_state: EditorTableState,
 }
 
@@ -34,11 +39,31 @@ impl App {
         Self {
             store,
             running,
+            items: vec![],
+            last_updated_checkpoint: 0,
+            filter: "".to_string(),
             editor_table_state: EditorTableState::default(),
         }
     }
 
+    fn refresh_if_needed(&mut self) -> AHResult<()> {
+        if self.store.modified_since(self.last_updated_checkpoint)? {
+            self.last_updated_checkpoint = self.store.last_checkpoint_id()?;
+            self.items = self
+                .store
+                .query(Item::q())
+                .iter_converted(&self.store)?
+                .collect();
+            self.items
+                .sort_by_key(|i| (i.location.name.clone(), i.bin_no, i.name.clone()))
+        }
+
+        Ok(())
+    }
+
     pub fn render_to<B: Backend>(&mut self, f: &mut Frame<'_, B>) {
+        self.refresh_if_needed().unwrap();
+
         let outer_frame = Block::default().borders(Borders::TOP).title(" Pachinko ");
         let inner_size = outer_frame.inner(f.size());
         f.render_widget(outer_frame, f.size());
@@ -49,36 +74,75 @@ impl App {
             .split(inner_size);
 
         f.render_stateful_widget(
-            EditorTable::new(&self.store, Item::q()).columns(vec![
-                EditorColumn::new("Location", EditorColumnWidth::Shrink, |store, o| {
-                    Ok(Item::try_convert(o.clone(), &store)?
-                        .format_with_store(store)?
-                        .format_location())
+            EditorTable::new(&self.items).columns(vec![
+                EditorColumn::new("Location", EditorColumnWidth::Shrink, |o| {
+                    Ok(o.format().format_location())
                 }),
-                EditorColumn::new("Size", EditorColumnWidth::Shrink, |store, o| {
-                    Ok(Item::try_convert(o.clone(), &store)?.size)
-                }),
-                EditorColumn::new("Name", EditorColumnWidth::Expand, |store, o| {
-                    Ok(Item::try_convert(o.clone(), &store)?.name)
-                }),
+                EditorColumn::new("Size", EditorColumnWidth::Shrink, |o| Ok(o.size.clone())),
+                EditorColumn::new("Name", EditorColumnWidth::Expand, |o| Ok(o.name.clone())),
             ]),
             chunks[0],
             &mut self.editor_table_state,
         );
 
+        let status = if self.filter.is_empty() {
+            "".to_string()
+        } else {
+            format!("Search: {}", self.filter)
+        };
+
         f.render_widget(
-            Paragraph::new("Status").block(Block::default().borders(Borders::TOP)),
+            Paragraph::new(status).block(Block::default().borders(Borders::TOP)),
             chunks[1],
         );
     }
 
+    fn find_filter_index(&self) -> Option<usize> {
+        let char_matchers: Vec<String> = self
+            .filter
+            .chars()
+            .map(|c| format!("{}.*", regex::escape(&c.to_string())))
+            .collect();
+        let re = regex::Regex::new(&("(?i).*".to_string() + &char_matchers.join(""))).unwrap();
+        eprintln!("re: {:?}", re);
+
+        self.items.iter().position(|i| re.is_match(&i.name))
+    }
+
     pub fn handle(&mut self, ev: Event) {
+        if let Event::Key(ke) = ev {
+            if ke.modifiers.contains(KeyModifiers::ALT) {
+                if let KeyCode::Char(c) = ke.code {
+                    self.filter.push(c);
+
+                    if let Some(i) = self.find_filter_index() {
+                        self.editor_table_state.set_selected(i);
+                    }
+                    return;
+                }
+            }
+        }
+
+        self.filter = "".to_string();
+
         match ev {
             Event::Key(e) => match e.code {
                 KeyCode::Char('q') => {
                     self.running.store(false, Ordering::SeqCst);
                 }
+                KeyCode::Up => {
+                    self.editor_table_state.move_up();
+                }
                 KeyCode::Down => {
+                    self.editor_table_state.move_down();
+                }
+                _ => {}
+            },
+            Event::Mouse(e) => match e.kind {
+                crossterm::event::MouseEventKind::ScrollUp => {
+                    self.editor_table_state.move_up();
+                }
+                crossterm::event::MouseEventKind::ScrollDown => {
                     self.editor_table_state.move_down();
                 }
                 _ => {}
@@ -93,17 +157,17 @@ enum EditorColumnWidth {
     Shrink,
 }
 
-struct EditorColumn {
+struct EditorColumn<O> {
     header: String,
-    display: fn(&Store, &Object) -> AHResult<String>,
+    display: fn(&O) -> AHResult<String>,
     width: EditorColumnWidth,
 }
 
-impl EditorColumn {
+impl<O> EditorColumn<O> {
     fn new(
         header: impl Into<String>,
         width: EditorColumnWidth,
-        display: fn(&Store, &Object) -> AHResult<String>,
+        display: fn(&O) -> AHResult<String>,
     ) -> Self {
         Self {
             header: header.into(),
@@ -113,22 +177,20 @@ impl EditorColumn {
     }
 }
 
-struct EditorTable<'store> {
-    store: &'store Store,
-    rows: CachedCollection,
-    columns: Vec<EditorColumn>,
+struct EditorTable<'o, O> {
+    objects: &'o Vec<O>,
+    columns: Vec<EditorColumn<O>>,
 }
 
-impl<'store> EditorTable<'store> {
-    fn new(store: &'store Store, query: impl Into<QueryNode>) -> Self {
+impl<'o, O> EditorTable<'o, O> {
+    fn new(objects: &'o Vec<O>) -> Self {
         Self {
-            store,
-            rows: store.cached_query(query).unwrap(),
+            objects,
             columns: vec![],
         }
     }
 
-    fn columns(mut self, columns: Vec<EditorColumn>) -> Self {
+    fn columns(mut self, columns: Vec<EditorColumn<O>>) -> Self {
         self.columns = columns;
 
         self
@@ -141,26 +203,34 @@ struct EditorTableState {
 }
 
 impl EditorTableState {
+    fn move_up(&mut self) {
+        self.table_state
+            .set_offset(self.table_state.get_offset().saturating_sub(1));
+    }
+
     fn move_down(&mut self) {
         self.table_state
-            .set_offset(self.table_state.get_offset() + 1)
+            .set_offset(self.table_state.get_offset() + 1);
+    }
+
+    fn set_selected(&mut self, i: usize) {
+        self.table_state.select(Some(i));
     }
 }
 
-impl<'store> StatefulWidget for EditorTable<'store> {
+impl<'o, O> StatefulWidget for EditorTable<'o, O> {
     type State = EditorTableState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let store = self.store;
         let columns = self.columns;
 
         let rows: Vec<Vec<_>> = self
-            .rows
+            .objects
             .iter()
             .map(|o| {
                 columns
                     .iter()
-                    .map(|c| (c.display)(store, o).unwrap_or("".to_string()))
+                    .map(|c| (c.display)(o).unwrap_or("".to_string()))
                     .collect()
             })
             .collect();
@@ -178,6 +248,7 @@ impl<'store> StatefulWidget for EditorTable<'store> {
 
         StatefulWidget::render(
             Sheet::new(rows.into_iter().map(|r| Row::new(r)))
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                 .header(Row::new(columns.iter().map(|c| {
                     Span::styled(
                         c.header.clone(),
@@ -204,7 +275,7 @@ impl<'store> StatefulWidget for EditorTable<'store> {
     }
 }
 
-impl<'store> Widget for EditorTable<'store> {
+impl<'o, O> Widget for EditorTable<'o, O> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut state = EditorTableState::default();
         StatefulWidget::render(self, area, buf, &mut state);
