@@ -32,6 +32,7 @@ pub struct App {
     running: Arc<AtomicBool>,
     search: String,
     search_in_progress: bool,
+    search_forward: bool,
     empty_alt_in_progress: bool,
     editor_table_state: EditorTableState,
 }
@@ -45,6 +46,7 @@ impl App {
             last_updated_checkpoint: 0,
             search: "".to_string(),
             search_in_progress: false,
+            search_forward: true,
             empty_alt_in_progress: false,
             editor_table_state: EditorTableState::default(),
         }
@@ -109,9 +111,26 @@ impl App {
             .collect();
         let re = regex::Regex::new(&("(?i).*".to_string() + &char_matchers.join(""))).unwrap();
 
-        let start_i = (self.editor_table_state.selected().unwrap_or(0) + offset) % self.items.len();
+        let effective_offset = offset
+            * if self.search_forward {
+                1
+            } else {
+                self.items.len().saturating_sub(1)
+            };
 
-        for i in ((start_i + 1)..self.items.len()).chain(0..(start_i)) {
+        let start_i =
+            (self.editor_table_state.selected().unwrap_or(0) + effective_offset) % self.items.len();
+
+        let indices: Vec<usize> = if self.search_forward {
+            ((start_i)..self.items.len()).chain(0..(start_i)).collect()
+        } else {
+            (0..=(start_i))
+                .rev()
+                .chain(((start_i + 1)..self.items.len()).rev())
+                .collect()
+        };
+
+        for i in indices {
             if re.is_match(&self.items[i].name) {
                 self.editor_table_state.set_selected(i);
                 break;
@@ -142,6 +161,8 @@ impl App {
                 match ke.kind {
                     KeyEventKind::Press => {
                         self.empty_alt_in_progress = true;
+                        self.search_forward =
+                            ke.code == KeyCode::Modifier(ModifierKeyCode::RightAlt);
                     }
                     KeyEventKind::Release => {
                         if self.empty_alt_in_progress {
@@ -157,9 +178,8 @@ impl App {
 
         match ev {
             Event::Key(e) => {
-                if e.kind == KeyEventKind::Press {
+                if e.kind == KeyEventKind::Press || e.kind == KeyEventKind::Repeat {
                     // Backup in case we're on a non-enhanced terminal.
-                    eprintln!("backup clear");
                     self.search = "".to_string();
                     self.search_in_progress = false;
 
@@ -179,10 +199,10 @@ impl App {
             }
             Event::Mouse(e) => match e.kind {
                 crossterm::event::MouseEventKind::ScrollUp => {
-                    self.editor_table_state.move_up();
+                    self.editor_table_state.scroll_up(3);
                 }
                 crossterm::event::MouseEventKind::ScrollDown => {
-                    self.editor_table_state.move_down();
+                    self.editor_table_state.scroll_down(3);
                 }
                 _ => {}
             },
@@ -243,13 +263,24 @@ struct EditorTableState {
 
 impl EditorTableState {
     fn move_up(&mut self) {
-        self.table_state
-            .set_offset(self.table_state.get_offset().saturating_sub(1));
+        self.table_state.select(
+            self.table_state
+                .selected()
+                .map_or(Some(0), |s| Some(s.saturating_sub(1))),
+        );
     }
 
     fn move_down(&mut self) {
         self.table_state
-            .set_offset(self.table_state.get_offset() + 1);
+            .select(self.table_state.selected().map_or(Some(0), |s| Some(s + 1)));
+    }
+
+    fn scroll_up(&mut self, delta: usize) {
+        self.table_state.scroll_up(delta)
+    }
+
+    fn scroll_down(&mut self, delta: usize) {
+        self.table_state.scroll_down(delta)
     }
 
     fn selected(&self) -> Option<usize> {

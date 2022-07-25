@@ -343,7 +343,7 @@ impl<'a> Sheet<'a> {
             end += 1;
         }
 
-        let selected = selected.unwrap_or(0).min(self.rows.len() - 1);
+        let selected = selected.unwrap_or(offset).min(self.rows.len() - 1);
         while selected >= end {
             height = height.saturating_add(self.rows[end].total_height());
             end += 1;
@@ -368,6 +368,7 @@ impl<'a> Sheet<'a> {
 pub struct SheetState {
     offset: usize,
     selected: Option<usize>,
+    last_rows_height: Option<u16>,
 }
 
 impl SheetState {
@@ -389,6 +390,21 @@ impl SheetState {
     pub fn set_offset(&mut self, offset: usize) {
         self.selected = Some(offset);
         self.offset = offset;
+    }
+
+    pub fn scroll_up(&mut self, delta: usize) {
+        self.offset = self.offset.saturating_sub(delta);
+
+        if let Some(last_rows_height) = self.last_rows_height {
+            self.selected = self
+                .selected
+                .map(|s| s.min(self.offset + last_rows_height as usize - 1));
+        }
+    }
+
+    pub fn scroll_down(&mut self, delta: usize) {
+        self.offset += delta;
+        self.selected = self.selected.map(|s| s.max(self.offset));
     }
 }
 
@@ -454,6 +470,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
             return;
         }
         let (start, end) = self.get_row_bounds(state.selected, state.offset, rows_height);
+        state.last_rows_height = Some(rows_height);
         state.offset = start;
         for (i, table_row) in self
             .rows
