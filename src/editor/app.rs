@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use crossterm::event::{Event, KeyCode, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode};
 use qualia::{
     query::QueryNode, CachedMapping, CheckpointId, Object, ObjectShape, Queryable, Store, Q,
 };
@@ -30,7 +30,9 @@ pub struct App {
     items: Vec<Item>,
     last_updated_checkpoint: CheckpointId,
     running: Arc<AtomicBool>,
-    filter: String,
+    search: String,
+    search_in_progress: bool,
+    empty_alt_in_progress: bool,
     editor_table_state: EditorTableState,
 }
 
@@ -41,7 +43,9 @@ impl App {
             running,
             items: vec![],
             last_updated_checkpoint: 0,
-            filter: "".to_string(),
+            search: "".to_string(),
+            search_in_progress: false,
+            empty_alt_in_progress: false,
             editor_table_state: EditorTableState::default(),
         }
     }
@@ -85,10 +89,10 @@ impl App {
             &mut self.editor_table_state,
         );
 
-        let status = if self.filter.is_empty() {
+        let status = if self.search.is_empty() {
             "".to_string()
         } else {
-            format!("Search: {}", self.filter)
+            format!("Search: {}", self.search)
         };
 
         f.render_widget(
@@ -97,47 +101,82 @@ impl App {
         );
     }
 
-    fn find_filter_index(&self) -> Option<usize> {
+    fn select_search(&mut self, offset: usize) {
         let char_matchers: Vec<String> = self
-            .filter
+            .search
             .chars()
             .map(|c| format!("{}.*", regex::escape(&c.to_string())))
             .collect();
         let re = regex::Regex::new(&("(?i).*".to_string() + &char_matchers.join(""))).unwrap();
-        eprintln!("re: {:?}", re);
 
-        self.items.iter().position(|i| re.is_match(&i.name))
+        let start_i = (self.editor_table_state.selected().unwrap_or(0) + offset) % self.items.len();
+
+        for i in ((start_i + 1)..self.items.len()).chain(0..(start_i)) {
+            if re.is_match(&self.items[i].name) {
+                self.editor_table_state.set_selected(i);
+                break;
+            }
+        }
     }
 
     pub fn handle(&mut self, ev: Event) {
         if let Event::Key(ke) = ev {
-            if ke.modifiers.contains(KeyModifiers::ALT) {
+            if ke.modifiers.contains(KeyModifiers::ALT) && ke.kind == KeyEventKind::Press {
                 if let KeyCode::Char(c) = ke.code {
-                    self.filter.push(c);
-
-                    if let Some(i) = self.find_filter_index() {
-                        self.editor_table_state.set_selected(i);
+                    self.empty_alt_in_progress = false;
+                    if !self.search_in_progress {
+                        self.search = "".to_string();
                     }
+
+                    self.search.push(c);
+                    self.search_in_progress = true;
+
+                    self.select_search(0);
                     return;
                 }
             }
+
+            if ke.code == KeyCode::Modifier(ModifierKeyCode::LeftAlt)
+                || ke.code == KeyCode::Modifier(ModifierKeyCode::RightAlt)
+            {
+                match ke.kind {
+                    KeyEventKind::Press => {
+                        self.empty_alt_in_progress = true;
+                    }
+                    KeyEventKind::Release => {
+                        if self.empty_alt_in_progress {
+                            self.select_search(1);
+                        }
+                        self.search_in_progress = false;
+                    }
+                    _ => {}
+                }
+                return;
+            }
         }
 
-        self.filter = "".to_string();
-
         match ev {
-            Event::Key(e) => match e.code {
-                KeyCode::Char('q') => {
-                    self.running.store(false, Ordering::SeqCst);
+            Event::Key(e) => {
+                if e.kind == KeyEventKind::Press {
+                    // Backup in case we're on a non-enhanced terminal.
+                    eprintln!("backup clear");
+                    self.search = "".to_string();
+                    self.search_in_progress = false;
+
+                    match e.code {
+                        KeyCode::Char('q') => {
+                            self.running.store(false, Ordering::SeqCst);
+                        }
+                        KeyCode::Up => {
+                            self.editor_table_state.move_up();
+                        }
+                        KeyCode::Down => {
+                            self.editor_table_state.move_down();
+                        }
+                        _ => {}
+                    }
                 }
-                KeyCode::Up => {
-                    self.editor_table_state.move_up();
-                }
-                KeyCode::Down => {
-                    self.editor_table_state.move_down();
-                }
-                _ => {}
-            },
+            }
             Event::Mouse(e) => match e.kind {
                 crossterm::event::MouseEventKind::ScrollUp => {
                     self.editor_table_state.move_up();
@@ -211,6 +250,10 @@ impl EditorTableState {
     fn move_down(&mut self) {
         self.table_state
             .set_offset(self.table_state.get_offset() + 1);
+    }
+
+    fn selected(&self) -> Option<usize> {
+        self.table_state.selected()
     }
 
     fn set_selected(&mut self, i: usize) {
