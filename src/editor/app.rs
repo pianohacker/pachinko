@@ -13,8 +13,8 @@ use qualia::{
 use tui::{
     backend::Backend,
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
+    style::{Color, Modifier, Style},
     text::Span,
     widgets::{Block, Borders, List, ListItem, Paragraph, StatefulWidget, Widget},
     Frame,
@@ -70,7 +70,10 @@ impl App {
     pub fn render_to<B: Backend>(&mut self, f: &mut Frame<'_, B>) {
         self.refresh_if_needed().unwrap();
 
-        let outer_frame = Block::default().borders(Borders::TOP).title(" Pachinko ");
+        let outer_frame = Block::default().title(Span::styled(
+            format!("{:width$}", "Pachinko", width = f.size().width as usize),
+            Style::default().add_modifier(Modifier::REVERSED),
+        ));
         let inner_size = outer_frame.inner(f.size());
         f.render_widget(outer_frame, f.size());
 
@@ -322,13 +325,15 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
 
         StatefulWidget::render(
             Sheet::new(rows.into_iter().map(|r| Row::new(r)))
-                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-                .header(Row::new(columns.iter().map(|c| {
-                    Span::styled(
-                        c.header.clone(),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    )
-                })))
+                .highlight_style(
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::Indexed(238)),
+                )
+                .header(
+                    Row::new(columns.iter().map(|c| c.header.clone()))
+                        .style(Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED)),
+                )
                 .widths(
                     &columns
                         .iter()
@@ -342,7 +347,10 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
                         .collect::<Vec<_>>(),
                 )
                 .column_spacing(1),
-            area,
+            area.inner(&Margin {
+                horizontal: 1,
+                vertical: 0,
+            }),
             buf,
             &mut state.table_state,
         );
