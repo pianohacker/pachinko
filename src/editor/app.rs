@@ -32,7 +32,6 @@ pub struct App {
     running: Arc<AtomicBool>,
     search: String,
     search_in_progress: bool,
-    search_forward: bool,
     empty_alt_in_progress: bool,
     editor_table_state: EditorTableState,
 }
@@ -46,7 +45,6 @@ impl App {
             last_updated_checkpoint: 0,
             search: "".to_string(),
             search_in_progress: false,
-            search_forward: true,
             empty_alt_in_progress: false,
             editor_table_state: EditorTableState::default(),
         }
@@ -82,8 +80,21 @@ impl App {
             .constraints([Constraint::Min(0), Constraint::Length(2)])
             .split(inner_size);
 
+        let items: Vec<&Item> = if self.search.is_empty() {
+            self.items.iter().collect()
+        } else {
+            let char_matchers: Vec<String> = self
+                .search
+                .chars()
+                .map(|c| format!("{}.*", regex::escape(&c.to_string())))
+                .collect();
+            let re = regex::Regex::new(&("(?i).*".to_string() + &char_matchers.join(""))).unwrap();
+
+            self.items.iter().filter(|i| re.is_match(&i.name)).collect()
+        };
+
         f.render_stateful_widget(
-            EditorTable::new(&self.items).columns(vec![
+            EditorTable::new(items).columns(vec![
                 EditorColumn::new("Location", EditorColumnWidth::Shrink, |o| {
                     Ok(o.format().format_location())
                 }),
@@ -106,72 +117,35 @@ impl App {
         );
     }
 
-    fn select_search(&mut self, offset: usize) {
-        let char_matchers: Vec<String> = self
-            .search
-            .chars()
-            .map(|c| format!("{}.*", regex::escape(&c.to_string())))
-            .collect();
-        let re = regex::Regex::new(&("(?i).*".to_string() + &char_matchers.join(""))).unwrap();
-
-        let effective_offset = offset
-            * if self.search_forward {
-                1
-            } else {
-                self.items.len().saturating_sub(1)
-            };
-
-        let start_i =
-            (self.editor_table_state.selected().unwrap_or(0) + effective_offset) % self.items.len();
-
-        let indices: Vec<usize> = if self.search_forward {
-            ((start_i)..self.items.len()).chain(0..(start_i)).collect()
-        } else {
-            (0..=(start_i))
-                .rev()
-                .chain(((start_i + 1)..self.items.len()).rev())
-                .collect()
-        };
-
-        for i in indices {
-            if re.is_match(&self.items[i].name) {
-                self.editor_table_state.set_selected(i);
-                break;
-            }
-        }
-    }
-
     pub fn handle(&mut self, ev: Event) {
         if let Event::Key(ke) = ev {
-            if ke.modifiers.contains(KeyModifiers::ALT) && ke.kind == KeyEventKind::Press {
+            if ke.modifiers.contains(KeyModifiers::CONTROL) && ke.kind == KeyEventKind::Press {
                 if let KeyCode::Char(c) = ke.code {
-                    self.empty_alt_in_progress = false;
                     if !self.search_in_progress {
                         self.search = "".to_string();
                     }
+                    self.empty_alt_in_progress = false;
 
                     self.search.push(c);
                     self.search_in_progress = true;
 
-                    self.select_search(0);
                     return;
                 }
             }
 
-            if ke.code == KeyCode::Modifier(ModifierKeyCode::LeftAlt)
-                || ke.code == KeyCode::Modifier(ModifierKeyCode::RightAlt)
+            if ke.code == KeyCode::Modifier(ModifierKeyCode::LeftControl)
+                || ke.code == KeyCode::Modifier(ModifierKeyCode::RightControl)
             {
                 match ke.kind {
                     KeyEventKind::Press => {
-                        self.empty_alt_in_progress = true;
-                        self.search_forward =
-                            ke.code == KeyCode::Modifier(ModifierKeyCode::RightAlt);
+                        self.search_in_progress = false;
+
+                        if self.empty_alt_in_progress {
+                            self.search = "".to_string();
+                        }
                     }
                     KeyEventKind::Release => {
-                        if self.empty_alt_in_progress {
-                            self.select_search(1);
-                        }
-                        self.search_in_progress = false;
+                        self.empty_alt_in_progress = true;
                     }
                     _ => {}
                 }
@@ -182,10 +156,6 @@ impl App {
         match ev {
             Event::Key(e) => {
                 if e.kind == KeyEventKind::Press || e.kind == KeyEventKind::Repeat {
-                    // Backup in case we're on a non-enhanced terminal.
-                    self.search = "".to_string();
-                    self.search_in_progress = false;
-
                     match e.code {
                         KeyCode::Char('q') => {
                             self.running.store(false, Ordering::SeqCst);
@@ -240,14 +210,14 @@ impl<O> EditorColumn<O> {
 }
 
 struct EditorTable<'o, O> {
-    objects: &'o Vec<O>,
+    objects: Vec<&'o O>,
     columns: Vec<EditorColumn<O>>,
 }
 
 impl<'o, O> EditorTable<'o, O> {
-    fn new(objects: &'o Vec<O>) -> Self {
+    fn new(objects: impl IntoIterator<Item = &'o O>) -> Self {
         Self {
-            objects,
+            objects: objects.into_iter().collect(),
             columns: vec![],
         }
     }
@@ -307,7 +277,7 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
             .map(|o| {
                 columns
                     .iter()
-                    .map(|c| (c.display)(o).unwrap_or("".to_string()))
+                    .map(|c| (c.display)(*o).unwrap_or("".to_string()))
                     .collect()
             })
             .collect();
