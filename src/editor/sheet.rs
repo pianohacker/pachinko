@@ -469,6 +469,13 @@ impl<'a> StatefulWidget for Sheet<'a> {
         if self.rows.is_empty() {
             return;
         }
+
+        if let Some(selected) = state.selected {
+            if selected >= self.rows.len() {
+                state.selected = Some(self.rows.len() - 1);
+            }
+        }
+
         let (start, end) = self.get_row_bounds(state.selected, state.offset, rows_height);
         state.last_rows_height = Some(rows_height);
         state.offset = start;

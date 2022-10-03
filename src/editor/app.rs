@@ -34,6 +34,7 @@ pub struct App {
     search_in_progress: bool,
     empty_alt_in_progress: bool,
     editor_table_state: EditorTableState,
+    last_table_size: Option<Rect>,
 }
 
 impl App {
@@ -47,6 +48,7 @@ impl App {
             search_in_progress: false,
             empty_alt_in_progress: false,
             editor_table_state: EditorTableState::default(),
+            last_table_size: None,
         }
     }
 
@@ -73,12 +75,15 @@ impl App {
             Style::default().add_modifier(Modifier::REVERSED),
         ));
         let inner_size = outer_frame.inner(f.size());
+
         f.render_widget(outer_frame, f.size());
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(2)])
             .split(inner_size);
+
+        self.last_table_size = Some(chunks[0]);
 
         let items: Vec<&Item> = if self.search.is_empty() {
             self.items.iter().collect()
@@ -165,6 +170,19 @@ impl App {
                         }
                         KeyCode::Down => {
                             self.editor_table_state.move_down();
+                        }
+                        KeyCode::PageUp => {
+                            if let Some(table_size) = self.last_table_size {
+                                self.editor_table_state
+                                    .scroll_up((table_size.height as usize).saturating_sub(3));
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            if let Some(table_size) = self.last_table_size {
+                                dbg!(&e);
+                                self.editor_table_state
+                                    .scroll_down((table_size.height as usize).saturating_sub(3));
+                            }
                         }
                         _ => {}
                     }
@@ -254,14 +272,6 @@ impl EditorTableState {
 
     fn scroll_down(&mut self, delta: usize) {
         self.table_state.scroll_down(delta)
-    }
-
-    fn selected(&self) -> Option<usize> {
-        self.table_state.selected()
-    }
-
-    fn set_selected(&mut self, i: usize) {
-        self.table_state.select(Some(i));
     }
 }
 
