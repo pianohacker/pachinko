@@ -86,20 +86,25 @@ impl App {
     pub fn render_to<B: Backend>(&mut self, f: &mut Frame<'_, B>) {
         self.refresh_if_needed().unwrap();
 
+        let status = if self.search.is_empty() {
+            "".to_string()
+        } else {
+            format!(" - search: \"{}\"", self.search)
+        };
+
         let outer_frame = Block::default().title(Span::styled(
-            format!("{:width$}", "Pachinko", width = f.size().width as usize),
+            format!(
+                "{:width$}",
+                format!("Pachinko{}", status),
+                width = f.size().width as usize
+            ),
             Style::default().add_modifier(Modifier::REVERSED),
         ));
         let inner_size = outer_frame.inner(f.size());
 
         f.render_widget(outer_frame, f.size());
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(2)])
-            .split(inner_size);
-
-        self.last_table_size = Some(chunks[0]);
+        self.last_table_size = Some(inner_size);
 
         let items: Vec<DisplayItem> = if self.search.is_empty() {
             self.items
@@ -151,7 +156,7 @@ impl App {
                         for idx in &i.name_highlight_indices {
                             spans[*idx] = Span::styled(
                                 spans[*idx].content.clone(),
-                                Style::default().add_modifier(Modifier::BOLD),
+                                Style::default().bg(Color::Indexed(58)),
                             );
                         }
 
@@ -159,19 +164,8 @@ impl App {
                     }
                 }),
             ]),
-            chunks[0],
+            inner_size,
             &mut self.editor_table_state,
-        );
-
-        let status = if self.search.is_empty() {
-            "".to_string()
-        } else {
-            format!("Search: {}", self.search)
-        };
-
-        f.render_widget(
-            Paragraph::new(status).block(Block::default().borders(Borders::TOP)),
-            chunks[1],
         );
     }
 
@@ -224,8 +218,14 @@ impl App {
                         KeyCode::Down => {
                             self.editor_table_state.move_down();
                         }
+                        KeyCode::Left => {
+                            self.editor_table_state.move_left();
+                        }
                         KeyCode::Right => {
                             self.editor_table_state.move_right();
+                        }
+                        KeyCode::Esc => {
+                            self.editor_table_state.back_out();
                         }
                         KeyCode::PageUp => {
                             if let Some(table_size) = self.last_table_size {
@@ -324,12 +324,29 @@ impl EditorTableState {
         );
     }
 
+    fn move_left(&mut self) {
+        self.table_state
+            .select_row_and_cell(match self.table_state.selected_row_and_cell() {
+                None => Some((0, Some(0))),
+                Some((r, None)) => Some((r, Some(usize::MAX))), // Will get reduced to actual width by table renderer
+                Some((r, Some(c))) => Some((r, Some(c.saturating_sub(1)))),
+            });
+    }
+
     fn move_right(&mut self) {
         self.table_state
             .select_row_and_cell(match self.table_state.selected_row_and_cell() {
                 None => Some((0, Some(0))),
                 Some((r, None)) => Some((r, Some(0))),
                 Some((r, Some(c))) => Some((r, Some(c + 1))),
+            });
+    }
+
+    fn back_out(&mut self) {
+        self.table_state
+            .select_row_and_cell(match self.table_state.selected_row_and_cell() {
+                None | Some((_, None)) => None,
+                Some((r, Some(_))) => Some((r, None)),
             });
     }
 

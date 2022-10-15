@@ -489,9 +489,15 @@ impl<'a> StatefulWidget for Sheet<'a> {
             return;
         }
 
-        if let Some(selected) = state.selected_row {
-            if selected >= self.rows.len() {
+        if let Some(selected_row) = state.selected_row {
+            if selected_row >= self.rows.len() {
                 state.selected_row = Some(self.rows.len() - 1);
+            }
+
+            if let Some(selected_col) = state.selected_col {
+                if selected_col >= self.widths.len() {
+                    state.selected_col = Some(self.widths.len() - 1);
+                }
             }
         }
 
@@ -529,11 +535,16 @@ impl<'a> StatefulWidget for Sheet<'a> {
             } else {
                 col
             };
+
             let mut col = table_row_start_col;
             if is_selected {
                 buf.set_style(table_row_area, self.highlight_style);
             }
-            for (width, cell) in columns_widths.iter().zip(table_row.cells.iter()) {
+            for (j, (width, cell)) in columns_widths
+                .iter()
+                .zip(table_row.cells.iter())
+                .enumerate()
+            {
                 render_cell(
                     buf,
                     cell,
@@ -543,8 +554,8 @@ impl<'a> StatefulWidget for Sheet<'a> {
                         width: *width,
                         height: table_row.height,
                     },
-                    if state.selected_col == Some(col as usize) {
-                        Some(self.highlight_cell_style)
+                    if is_selected && state.selected_col == Some(j) {
+                        Some(highlight_cell_style)
                     } else {
                         None
                     },
