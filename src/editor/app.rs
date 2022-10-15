@@ -1,5 +1,7 @@
 use std::{
     convert::TryFrom,
+    fmt::Display,
+    ops::Deref,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -7,6 +9,7 @@ use std::{
 };
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode};
+use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use qualia::{
     query::QueryNode, CachedMapping, CheckpointId, Object, ObjectShape, Queryable, Store, Q,
 };
@@ -15,12 +18,12 @@ use tui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::Span,
+    text::{Span, Spans},
     widgets::{Block, Borders, List, ListItem, Paragraph, StatefulWidget, Widget},
     Frame,
 };
 
-use crate::types::Item;
+use crate::types::{FormattedItem, Item};
 use crate::AHResult;
 
 use super::sheet::{Row, Sheet, SheetState};
@@ -35,6 +38,19 @@ pub struct App {
     empty_alt_in_progress: bool,
     editor_table_state: EditorTableState,
     last_table_size: Option<Rect>,
+}
+
+struct DisplayItem {
+    name_highlight_indices: Vec<usize>,
+    item: FormattedItem,
+}
+
+impl Deref for DisplayItem {
+    type Target = FormattedItem;
+
+    fn deref(&self) -> &Self::Target {
+        &self.item
+    }
 }
 
 impl App {
@@ -85,26 +101,63 @@ impl App {
 
         self.last_table_size = Some(chunks[0]);
 
-        let items: Vec<&Item> = if self.search.is_empty() {
-            self.items.iter().collect()
+        let items: Vec<DisplayItem> = if self.search.is_empty() {
+            self.items
+                .iter()
+                .map(|i| DisplayItem {
+                    item: i.format(),
+                    name_highlight_indices: Vec::default(),
+                })
+                .collect()
         } else {
-            let char_matchers: Vec<String> = self
-                .search
-                .chars()
-                .map(|c| format!("{}.*", regex::escape(&c.to_string())))
-                .collect();
-            let re = regex::Regex::new(&("(?i).*".to_string() + &char_matchers.join(""))).unwrap();
+            let matcher = SkimMatcherV2::default();
 
-            self.items.iter().filter(|i| re.is_match(&i.name)).collect()
+            let mut result: Vec<_> = self
+                .items
+                .iter()
+                .filter_map(|i| {
+                    matcher
+                        .fuzzy_indices(&i.name, &self.search)
+                        .map(|(score, indices)| (score, indices, i))
+                })
+                .collect();
+
+            result.sort_by_key(|(score, _, i)| (-*score, i.format().format_location(), &i.name));
+
+            result
+                .into_iter()
+                .map(|(_, indices, i)| DisplayItem {
+                    item: i.format(),
+                    name_highlight_indices: indices,
+                })
+                .collect()
         };
 
         f.render_stateful_widget(
             EditorTable::new(items).columns(vec![
-                EditorColumn::new("Location", EditorColumnWidth::Shrink, |o| {
-                    Ok(o.format().format_location())
+                EditorColumn::new("Location", EditorColumnWidth::Shrink, |i| {
+                    Ok(i.format_location().into())
                 }),
-                EditorColumn::new("Size", EditorColumnWidth::Shrink, |o| Ok(o.size.clone())),
-                EditorColumn::new("Name", EditorColumnWidth::Expand, |o| Ok(o.name.clone())),
+                EditorColumn::new("Size", EditorColumnWidth::Shrink, |i| {
+                    Ok(i.size.clone().into())
+                }),
+                EditorColumn::new("Name", EditorColumnWidth::Expand, |i| {
+                    if i.name_highlight_indices.is_empty() {
+                        Ok(i.name.clone().into())
+                    } else {
+                        let mut spans: Vec<_> =
+                            i.name.chars().map(|c| Span::raw(c.to_string())).collect();
+
+                        for idx in &i.name_highlight_indices {
+                            spans[*idx] = Span::styled(
+                                spans[*idx].content.clone(),
+                                Style::default().add_modifier(Modifier::BOLD),
+                            );
+                        }
+
+                        Ok(Spans::from(spans))
+                    }
+                }),
             ]),
             chunks[0],
             &mut self.editor_table_state,
@@ -171,6 +224,9 @@ impl App {
                         KeyCode::Down => {
                             self.editor_table_state.move_down();
                         }
+                        KeyCode::Right => {
+                            self.editor_table_state.move_right();
+                        }
                         KeyCode::PageUp => {
                             if let Some(table_size) = self.last_table_size {
                                 self.editor_table_state
@@ -179,7 +235,6 @@ impl App {
                         }
                         KeyCode::PageDown => {
                             if let Some(table_size) = self.last_table_size {
-                                dbg!(&e);
                                 self.editor_table_state
                                     .scroll_down((table_size.height as usize).saturating_sub(3));
                             }
@@ -209,7 +264,7 @@ enum EditorColumnWidth {
 
 struct EditorColumn<O> {
     header: String,
-    display: fn(&O) -> AHResult<String>,
+    display: fn(&O) -> AHResult<Spans>,
     width: EditorColumnWidth,
 }
 
@@ -217,7 +272,7 @@ impl<O> EditorColumn<O> {
     fn new(
         header: impl Into<String>,
         width: EditorColumnWidth,
-        display: fn(&O) -> AHResult<String>,
+        display: fn(&O) -> AHResult<Spans>,
     ) -> Self {
         Self {
             header: header.into(),
@@ -227,13 +282,13 @@ impl<O> EditorColumn<O> {
     }
 }
 
-struct EditorTable<'o, O> {
-    objects: Vec<&'o O>,
+struct EditorTable<O> {
+    objects: Vec<O>,
     columns: Vec<EditorColumn<O>>,
 }
 
-impl<'o, O> EditorTable<'o, O> {
-    fn new(objects: impl IntoIterator<Item = &'o O>) -> Self {
+impl<O> EditorTable<O> {
+    fn new(objects: impl IntoIterator<Item = O>) -> Self {
         Self {
             objects: objects.into_iter().collect(),
             columns: vec![],
@@ -254,16 +309,28 @@ struct EditorTableState {
 
 impl EditorTableState {
     fn move_up(&mut self) {
-        self.table_state.select(
+        self.table_state.select_row(
             self.table_state
-                .selected()
+                .selected_row()
                 .map_or(Some(0), |s| Some(s.saturating_sub(1))),
         );
     }
 
     fn move_down(&mut self) {
+        self.table_state.select_row(
+            self.table_state
+                .selected_row()
+                .map_or(Some(0), |s| Some(s + 1)),
+        );
+    }
+
+    fn move_right(&mut self) {
         self.table_state
-            .select(self.table_state.selected().map_or(Some(0), |s| Some(s + 1)));
+            .select_row_and_cell(match self.table_state.selected_row_and_cell() {
+                None => Some((0, Some(0))),
+                Some((r, None)) => Some((r, Some(0))),
+                Some((r, Some(c))) => Some((r, Some(c + 1))),
+            });
     }
 
     fn scroll_up(&mut self, delta: usize) {
@@ -275,7 +342,7 @@ impl EditorTableState {
     }
 }
 
-impl<'o, O> StatefulWidget for EditorTable<'o, O> {
+impl<O> StatefulWidget for EditorTable<O> {
     type State = EditorTableState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
@@ -287,7 +354,7 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
             .map(|o| {
                 columns
                     .iter()
-                    .map(|c| (c.display)(*o).unwrap_or("".to_string()))
+                    .map(|c| (c.display)(o).unwrap_or("".into()))
                     .collect()
             })
             .collect();
@@ -297,7 +364,7 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
             .enumerate()
             .map(|(i, c)| {
                 std::iter::once(c.header.len())
-                    .chain(rows.iter().map(|r| r[i].len()))
+                    .chain(rows.iter().map(|r| r[i].width()))
                     .max()
                     .unwrap()
             })
@@ -309,6 +376,11 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
                     Style::default()
                         .add_modifier(Modifier::BOLD)
                         .bg(Color::Indexed(238)),
+                )
+                .highlight_cell_style(
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::Indexed(242)),
                 )
                 .header(
                     Row::new(columns.iter().map(|c| c.header.clone()))
@@ -337,7 +409,7 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
     }
 }
 
-impl<'o, O> Widget for EditorTable<'o, O> {
+impl<O> Widget for EditorTable<O> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut state = EditorTableState::default();
         StatefulWidget::render(self, area, buf, &mut state);

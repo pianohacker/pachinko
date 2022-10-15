@@ -222,6 +222,8 @@ pub struct Sheet<'a> {
     column_spacing: u16,
     /// Style used to render the selected row
     highlight_style: Style,
+    /// Style used to render the selected cell
+    highlight_cell_style: Style,
     /// Symbol in front of the selected rom
     highlight_symbol: Option<&'a str>,
     /// Optional header
@@ -241,6 +243,7 @@ impl<'a> Sheet<'a> {
             widths: &[],
             column_spacing: 1,
             highlight_style: Style::default(),
+            highlight_cell_style: Style::default(),
             highlight_symbol: None,
             header: None,
             rows: rows.into_iter().collect(),
@@ -282,6 +285,11 @@ impl<'a> Sheet<'a> {
 
     pub fn highlight_style(mut self, highlight_style: Style) -> Self {
         self.highlight_style = highlight_style;
+        self
+    }
+
+    pub fn highlight_cell_style(mut self, highlight_cell_style: Style) -> Self {
+        self.highlight_cell_style = highlight_cell_style;
         self
     }
 
@@ -367,20 +375,30 @@ impl<'a> Sheet<'a> {
 #[derive(Debug, Clone, Default)]
 pub struct SheetState {
     offset: usize,
-    selected: Option<usize>,
+    selected_row: Option<usize>,
+    selected_col: Option<usize>,
     last_rows_height: Option<u16>,
 }
 
 impl SheetState {
-    pub fn selected(&self) -> Option<usize> {
-        self.selected
+    pub fn selected_row(&self) -> Option<usize> {
+        self.selected_row
     }
 
-    pub fn select(&mut self, index: Option<usize>) {
-        self.selected = index;
+    pub fn select_row(&mut self, index: Option<usize>) {
+        self.selected_row = index;
         if index.is_none() {
             self.offset = 0;
         }
+    }
+
+    pub fn selected_row_and_cell(&self) -> Option<(usize, Option<usize>)> {
+        self.selected_row.map(|r| (r, self.selected_col))
+    }
+
+    pub fn select_row_and_cell(&mut self, indices: Option<(usize, Option<usize>)>) {
+        (self.selected_row, self.selected_col) =
+            indices.map_or((None, None), |(r, c)| (Some(r), c));
     }
 
     pub fn get_offset(&self) -> usize {
@@ -388,7 +406,7 @@ impl SheetState {
     }
 
     pub fn set_offset(&mut self, offset: usize) {
-        self.selected = Some(offset);
+        self.selected_row = Some(offset);
         self.offset = offset;
     }
 
@@ -396,15 +414,15 @@ impl SheetState {
         self.offset = self.offset.saturating_sub(delta);
 
         if let Some(last_rows_height) = self.last_rows_height {
-            self.selected = self
-                .selected
+            self.selected_row = self
+                .selected_row
                 .map(|s| s.min(self.offset + last_rows_height as usize - 1));
         }
     }
 
     pub fn scroll_down(&mut self, delta: usize) {
         self.offset += delta;
-        self.selected = self.selected.map(|s| s.max(self.offset));
+        self.selected_row = self.selected_row.map(|s| s.max(self.offset));
     }
 }
 
@@ -425,7 +443,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
             None => area,
         };
 
-        let has_selection = state.selected.is_some();
+        let has_selection = state.selected_row.is_some();
         let columns_widths = self.get_columns_widths(table_area.width, has_selection);
         let highlight_symbol = self.highlight_symbol.unwrap_or("");
         let blank_symbol = " ".repeat(highlight_symbol.width());
@@ -458,6 +476,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
                         width: *width,
                         height: max_header_height,
                     },
+                    None,
                 );
                 col += *width + self.column_spacing;
             }
@@ -470,13 +489,15 @@ impl<'a> StatefulWidget for Sheet<'a> {
             return;
         }
 
-        if let Some(selected) = state.selected {
+        if let Some(selected) = state.selected_row {
             if selected >= self.rows.len() {
-                state.selected = Some(self.rows.len() - 1);
+                state.selected_row = Some(self.rows.len() - 1);
             }
         }
 
-        let (start, end) = self.get_row_bounds(state.selected, state.offset, rows_height);
+        let highlight_cell_style = self.highlight_style.patch(self.highlight_cell_style);
+
+        let (start, end) = self.get_row_bounds(state.selected_row, state.offset, rows_height);
         state.last_rows_height = Some(rows_height);
         state.offset = start;
         for (i, table_row) in self
@@ -495,7 +516,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
                 height: table_row.height,
             };
             buf.set_style(table_row_area, table_row.style);
-            let is_selected = state.selected.map(|s| s == i).unwrap_or(false);
+            let is_selected = state.selected_row.map(|s| s == i).unwrap_or(false);
             let table_row_start_col = if has_selection {
                 let symbol = if is_selected {
                     highlight_symbol
@@ -509,6 +530,9 @@ impl<'a> StatefulWidget for Sheet<'a> {
                 col
             };
             let mut col = table_row_start_col;
+            if is_selected {
+                buf.set_style(table_row_area, self.highlight_style);
+            }
             for (width, cell) in columns_widths.iter().zip(table_row.cells.iter()) {
                 render_cell(
                     buf,
@@ -519,18 +543,23 @@ impl<'a> StatefulWidget for Sheet<'a> {
                         width: *width,
                         height: table_row.height,
                     },
+                    if state.selected_col == Some(col as usize) {
+                        Some(self.highlight_cell_style)
+                    } else {
+                        None
+                    },
                 );
                 col += *width + self.column_spacing;
-            }
-            if is_selected {
-                buf.set_style(table_row_area, self.highlight_style);
             }
         }
     }
 }
 
-fn render_cell(buf: &mut Buffer, cell: &Cell, area: Rect) {
-    buf.set_style(area, cell.style);
+fn render_cell(buf: &mut Buffer, cell: &Cell, area: Rect, highlight_style: Option<Style>) {
+    buf.set_style(
+        area,
+        highlight_style.map_or(cell.style, |hs| cell.style.patch(hs)),
+    );
     for (i, spans) in cell.content.lines.iter().enumerate() {
         if i as u16 >= area.height {
             break;
