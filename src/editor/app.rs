@@ -239,6 +239,24 @@ impl App {
                                     .scroll_down((table_size.height as usize).saturating_sub(3));
                             }
                         }
+                        KeyCode::Enter if e.modifiers.contains(KeyModifiers::SHIFT) => {
+                            if let Some(insertion_point) = self.editor_table_state.insertion_point()
+                            {
+                                let location = self.items[insertion_point - 1].location.clone();
+
+                                self.items.insert(
+                                    insertion_point,
+                                    Item {
+                                        object_id: None,
+                                        name: "".to_string(),
+                                        location,
+                                        bin_no: 1,
+                                        size: "S".to_string(),
+                                    },
+                                );
+                                self.editor_table_state.select_row(insertion_point);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -324,6 +342,10 @@ impl EditorTableState {
         );
     }
 
+    fn select_row(&mut self, row: usize) {
+        self.table_state.select_row(Some(row));
+    }
+
     fn move_left(&mut self) {
         self.table_state
             .select_row_and_cell(match self.table_state.selected_row_and_cell() {
@@ -356,6 +378,13 @@ impl EditorTableState {
 
     fn scroll_down(&mut self, delta: usize) {
         self.table_state.scroll_down(delta)
+    }
+
+    fn insertion_point(&self) -> Option<usize> {
+        match self.table_state.selected_row_and_cell() {
+            Some((r, _)) => Some(r + 1),
+            _ => None,
+        }
     }
 }
 

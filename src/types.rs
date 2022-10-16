@@ -15,6 +15,7 @@ pub struct Location {
 #[derive(ObjectShape)]
 #[fixed_fields("type" => "item")]
 pub struct Item {
+    pub object_id: Option<i64>,
     pub name: String,
     pub location: Location,
     pub bin_no: i64,

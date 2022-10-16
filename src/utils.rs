@@ -26,14 +26,13 @@ fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> 
         .unwrap_or(&0);
 
     Ok((1..=num_bins)
-        .filter_map(|bin_no| {
+        .find_map(|bin_no| {
             if bin_fullnesses[&bin_no] <= *min_fullness {
                 Some(bin_no)
             } else {
                 None
             }
         })
-        .next()
         .unwrap())
 }
 
@@ -71,6 +70,7 @@ pub fn add_item(
     println!(
         "{}",
         Item {
+            object_id: None,
             location: location.clone(),
             bin_no: bin_number,
             name,
