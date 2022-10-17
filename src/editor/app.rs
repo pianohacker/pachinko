@@ -26,14 +26,14 @@ use tui::{
 use crate::types::{FormattedItem, Item};
 use crate::AHResult;
 
-use super::sheet::{Row, Sheet, SheetState};
+use super::sheet::{Row, Sheet, SheetSelection, SheetState};
 
 pub struct App {
     store: Store,
     items: Vec<Item>,
     last_updated_checkpoint: CheckpointId,
     running: Arc<AtomicBool>,
-    search: String,
+    search: Option<String>,
     search_in_progress: bool,
     empty_alt_in_progress: bool,
     editor_table_state: EditorTableState,
@@ -60,7 +60,7 @@ impl App {
             running,
             items: vec![],
             last_updated_checkpoint: 0,
-            search: "".to_string(),
+            search: None,
             search_in_progress: false,
             empty_alt_in_progress: false,
             editor_table_state: EditorTableState::default(),
@@ -86,10 +86,10 @@ impl App {
     pub fn render_to<B: Backend>(&mut self, f: &mut Frame<'_, B>) {
         self.refresh_if_needed().unwrap();
 
-        let status = if self.search.is_empty() {
-            "".to_string()
+        let status = if let Some(search) = &self.search {
+            format!(" - search: \"{}\"", search)
         } else {
-            format!(" - search: \"{}\"", self.search)
+            "".to_string()
         };
 
         let outer_frame = Block::default().title(Span::styled(
@@ -106,15 +106,7 @@ impl App {
 
         self.last_table_size = Some(inner_size);
 
-        let items: Vec<DisplayItem> = if self.search.is_empty() {
-            self.items
-                .iter()
-                .map(|i| DisplayItem {
-                    item: i.format(),
-                    name_highlight_indices: Vec::default(),
-                })
-                .collect()
-        } else {
+        let items: Vec<DisplayItem> = if let Some(search) = &self.search {
             let matcher = SkimMatcherV2::default();
 
             let mut result: Vec<_> = self
@@ -122,18 +114,27 @@ impl App {
                 .iter()
                 .filter_map(|i| {
                     matcher
-                        .fuzzy_indices(&i.name, &self.search)
+                        .fuzzy_indices(&i.name, search)
                         .map(|(score, indices)| (score, indices, i))
                 })
                 .collect();
 
-            result.sort_by_key(|(score, _, i)| (-*score, i.format().format_location(), &i.name));
+            result
+                .sort_by_key(|(score, _, i)| (-*score, i.location.name.clone(), i.bin_no, &i.name));
 
             result
                 .into_iter()
                 .map(|(_, indices, i)| DisplayItem {
                     item: i.format(),
                     name_highlight_indices: indices,
+                })
+                .collect()
+        } else {
+            self.items
+                .iter()
+                .map(|i| DisplayItem {
+                    item: i.format(),
+                    name_highlight_indices: Vec::default(),
                 })
                 .collect()
         };
@@ -169,17 +170,35 @@ impl App {
         );
     }
 
+    fn insert_item(&mut self) {
+        if let Some(insertion_point) = self.editor_table_state.insertion_point() {
+            let location = self.items[insertion_point - 1].location.clone();
+
+            self.items.insert(
+                insertion_point,
+                Item {
+                    object_id: None,
+                    name: "".to_string(),
+                    location,
+                    bin_no: 1,
+                    size: "S".to_string(),
+                },
+            );
+            self.editor_table_state.select_row(insertion_point);
+        }
+    }
+
     pub fn handle(&mut self, ev: Event) {
         if let Event::Key(ke) = ev {
             if ke.modifiers.contains(KeyModifiers::CONTROL) && ke.kind == KeyEventKind::Press {
                 if let KeyCode::Char(c) = ke.code {
                     if !self.search_in_progress {
-                        self.search = "".to_string();
+                        self.search = Some("".to_string());
                     }
-                    self.empty_alt_in_progress = false;
 
-                    self.search.push(c);
+                    self.search.get_or_insert_with(|| "".to_string()).push(c);
                     self.search_in_progress = true;
+                    self.editor_table_state.clear_selection();
 
                     return;
                 }
@@ -190,14 +209,17 @@ impl App {
             {
                 match ke.kind {
                     KeyEventKind::Press => {
-                        self.search_in_progress = false;
-
-                        if self.empty_alt_in_progress {
-                            self.search = "".to_string();
-                        }
+                        self.search_in_progress = true;
+                        self.search = Some("".to_string());
                     }
                     KeyEventKind::Release => {
-                        self.empty_alt_in_progress = true;
+                        self.search_in_progress = false;
+
+                        if let Some(search) = &self.search {
+                            if search.is_empty() {
+                                self.search = None;
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -209,7 +231,7 @@ impl App {
             Event::Key(e) => {
                 if e.kind == KeyEventKind::Press || e.kind == KeyEventKind::Repeat {
                     match e.code {
-                        KeyCode::Char('q') => {
+                        KeyCode::F(12) => {
                             self.running.store(false, Ordering::SeqCst);
                         }
                         KeyCode::Up => {
@@ -240,22 +262,10 @@ impl App {
                             }
                         }
                         KeyCode::Enter if e.modifiers.contains(KeyModifiers::SHIFT) => {
-                            if let Some(insertion_point) = self.editor_table_state.insertion_point()
-                            {
-                                let location = self.items[insertion_point - 1].location.clone();
-
-                                self.items.insert(
-                                    insertion_point,
-                                    Item {
-                                        object_id: None,
-                                        name: "".to_string(),
-                                        location,
-                                        bin_no: 1,
-                                        size: "S".to_string(),
-                                    },
-                                );
-                                self.editor_table_state.select_row(insertion_point);
-                            }
+                            self.insert_item();
+                        }
+                        KeyCode::Char(_) => {
+                            self.editor_table_state.handle_key(e);
                         }
                         _ => {}
                     }
@@ -327,49 +337,49 @@ struct EditorTableState {
 
 impl EditorTableState {
     fn move_up(&mut self) {
-        self.table_state.select_row(
-            self.table_state
-                .selected_row()
-                .map_or(Some(0), |s| Some(s.saturating_sub(1))),
-        );
+        let default_row = self.table_state.get_offset();
+        self.table_state
+            .map_selection(|s| s.map_row_or(default_row, |r| r.saturating_sub(1)));
     }
 
     fn move_down(&mut self) {
-        self.table_state.select_row(
-            self.table_state
-                .selected_row()
-                .map_or(Some(0), |s| Some(s + 1)),
-        );
+        let default_row = self.table_state.get_offset();
+        self.table_state
+            .map_selection(|s| s.map_row_or(default_row, |r| r + 1));
     }
 
     fn select_row(&mut self, row: usize) {
-        self.table_state.select_row(Some(row));
+        self.table_state.map_selection(|s| s.with_row(row));
     }
 
     fn move_left(&mut self) {
-        self.table_state
-            .select_row_and_cell(match self.table_state.selected_row_and_cell() {
-                None => Some((0, Some(0))),
-                Some((r, None)) => Some((r, Some(usize::MAX))), // Will get reduced to actual width by table renderer
-                Some((r, Some(c))) => Some((r, Some(c.saturating_sub(1)))),
-            });
+        use SheetSelection::*;
+        self.table_state.map_selection(|s| match s {
+            None => Cell(0, usize::MAX), // Will get reduced to actual width by table renderer
+            Row(r) => Cell(r, usize::MAX),
+            Cell(r, c) => Cell(r, c.saturating_sub(1)),
+        });
     }
 
     fn move_right(&mut self) {
-        self.table_state
-            .select_row_and_cell(match self.table_state.selected_row_and_cell() {
-                None => Some((0, Some(0))),
-                Some((r, None)) => Some((r, Some(0))),
-                Some((r, Some(c))) => Some((r, Some(c + 1))),
-            });
+        use SheetSelection::*;
+        self.table_state.map_selection(|s| match s {
+            None => Cell(0, 0), // Will get reduced to actual width by table renderer
+            Row(r) => Cell(r, 0),
+            Cell(r, c) => Cell(r, c + 1),
+        });
+    }
+
+    fn clear_selection(&mut self) {
+        self.table_state.select(SheetSelection::None);
     }
 
     fn back_out(&mut self) {
-        self.table_state
-            .select_row_and_cell(match self.table_state.selected_row_and_cell() {
-                None | Some((_, None)) => None,
-                Some((r, Some(_))) => Some((r, None)),
-            });
+        use SheetSelection::*;
+        self.table_state.map_selection(|s| match s {
+            None | Row(_) => None,
+            Cell(r, _) => Row(r),
+        });
     }
 
     fn scroll_up(&mut self, delta: usize) {
@@ -381,11 +391,14 @@ impl EditorTableState {
     }
 
     fn insertion_point(&self) -> Option<usize> {
-        match self.table_state.selected_row_and_cell() {
-            Some((r, _)) => Some(r + 1),
-            _ => None,
+        use SheetSelection::*;
+        match self.table_state.selection() {
+            Row(r) | Cell(r, _) => Option::Some(r + 1),
+            _ => Option::None,
         }
     }
+
+    fn handle_key(&mut self, e: crossterm::event::KeyEvent) {}
 }
 
 impl<O> StatefulWidget for EditorTable<O> {

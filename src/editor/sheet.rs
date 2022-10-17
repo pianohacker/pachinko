@@ -372,33 +372,101 @@ impl<'a> Sheet<'a> {
     }
 }
 
+#[derive(Copy, Debug, Clone)]
+pub enum SheetSelection {
+    None,
+    Row(usize),
+    Cell(usize, usize),
+}
+
+impl SheetSelection {
+    pub fn is_none(&self) -> bool {
+        match *self {
+            Self::None => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_some(&self) -> bool {
+        match *self {
+            Self::None => false,
+            _ => true,
+        }
+    }
+
+    pub fn row(&self) -> Option<usize> {
+        match *self {
+            Self::None => None,
+            Self::Row(r) | Self::Cell(r, _) => Some(r),
+        }
+    }
+
+    pub fn column(&self) -> Option<usize> {
+        match *self {
+            Self::None | Self::Row(_) => None,
+            Self::Cell(_, c) => Some(c),
+        }
+    }
+
+    pub fn with_row(self, row: usize) -> Self {
+        match self {
+            Self::None | Self::Row(_) => Self::Row(row),
+            Self::Cell(_, c) => Self::Cell(row, c),
+        }
+    }
+
+    pub fn map_row(self, f: impl FnOnce(usize) -> usize) -> Self {
+        match self {
+            Self::None => self,
+            Self::Row(r) => Self::Row(f(r)),
+            Self::Cell(r, c) => Self::Cell(f(r), c),
+        }
+    }
+
+    pub fn map_row_or(self, default: usize, f: impl FnOnce(usize) -> usize) -> Self {
+        match self {
+            Self::None => Self::Row(default),
+            Self::Row(r) => Self::Row(f(r)),
+            Self::Cell(r, c) => Self::Cell(f(r), c),
+        }
+    }
+
+    fn normalize(&mut self, width: usize, height: usize) {
+        *self = match *self {
+            Self::None => Self::None,
+            Self::Row(r) => Self::Row(r.min(height)),
+            Self::Cell(r, c) => Self::Cell(r.min(height), c.min(width)),
+        };
+    }
+}
+
+impl Default for SheetSelection {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SheetState {
     offset: usize,
-    selected_row: Option<usize>,
-    selected_col: Option<usize>,
+    selection: SheetSelection,
     last_rows_height: Option<u16>,
 }
 
 impl SheetState {
-    pub fn selected_row(&self) -> Option<usize> {
-        self.selected_row
+    pub fn selection(&self) -> SheetSelection {
+        self.selection
     }
 
-    pub fn select_row(&mut self, index: Option<usize>) {
-        self.selected_row = index;
-        if index.is_none() {
+    pub fn select(&mut self, selection: SheetSelection) {
+        self.selection = selection;
+        if selection.is_none() {
             self.offset = 0;
         }
     }
 
-    pub fn selected_row_and_cell(&self) -> Option<(usize, Option<usize>)> {
-        self.selected_row.map(|r| (r, self.selected_col))
-    }
-
-    pub fn select_row_and_cell(&mut self, indices: Option<(usize, Option<usize>)>) {
-        (self.selected_row, self.selected_col) =
-            indices.map_or((None, None), |(r, c)| (Some(r), c));
+    pub fn map_selection(&mut self, f: impl FnOnce(SheetSelection) -> SheetSelection) {
+        self.select(f(self.selection));
     }
 
     pub fn get_offset(&self) -> usize {
@@ -406,7 +474,7 @@ impl SheetState {
     }
 
     pub fn set_offset(&mut self, offset: usize) {
-        self.selected_row = Some(offset);
+        self.selection = self.selection.with_row(offset);
         self.offset = offset;
     }
 
@@ -414,15 +482,15 @@ impl SheetState {
         self.offset = self.offset.saturating_sub(delta);
 
         if let Some(last_rows_height) = self.last_rows_height {
-            self.selected_row = self
-                .selected_row
-                .map(|s| s.min(self.offset + last_rows_height as usize - 1));
+            self.selection = self
+                .selection
+                .map_row(|r| r.min(self.offset + last_rows_height as usize - 1));
         }
     }
 
     pub fn scroll_down(&mut self, delta: usize) {
         self.offset += delta;
-        self.selected_row = self.selected_row.map(|s| s.max(self.offset));
+        self.selection = self.selection.map_row(|r| r.max(self.offset));
     }
 }
 
@@ -443,7 +511,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
             None => area,
         };
 
-        let has_selection = state.selected_row.is_some();
+        let has_selection = state.selection.is_some();
         let columns_widths = self.get_columns_widths(table_area.width, has_selection);
         let highlight_symbol = self.highlight_symbol.unwrap_or("");
         let blank_symbol = " ".repeat(highlight_symbol.width());
@@ -489,21 +557,13 @@ impl<'a> StatefulWidget for Sheet<'a> {
             return;
         }
 
-        if let Some(selected_row) = state.selected_row {
-            if selected_row >= self.rows.len() {
-                state.selected_row = Some(self.rows.len() - 1);
-            }
-
-            if let Some(selected_col) = state.selected_col {
-                if selected_col >= self.widths.len() {
-                    state.selected_col = Some(self.widths.len() - 1);
-                }
-            }
-        }
+        state
+            .selection
+            .normalize(self.widths.len() - 1, self.rows.len() - 1);
 
         let highlight_cell_style = self.highlight_style.patch(self.highlight_cell_style);
 
-        let (start, end) = self.get_row_bounds(state.selected_row, state.offset, rows_height);
+        let (start, end) = self.get_row_bounds(state.selection.row(), state.offset, rows_height);
         state.last_rows_height = Some(rows_height);
         state.offset = start;
         for (i, table_row) in self
@@ -522,7 +582,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
                 height: table_row.height,
             };
             buf.set_style(table_row_area, table_row.style);
-            let is_selected = state.selected_row.map(|s| s == i).unwrap_or(false);
+            let is_selected = state.selection.row().map(|s| s == i).unwrap_or(false);
             let table_row_start_col = if has_selection {
                 let symbol = if is_selected {
                     highlight_symbol
@@ -554,7 +614,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
                         width: *width,
                         height: table_row.height,
                     },
-                    if is_selected && state.selected_col == Some(j) {
+                    if is_selected && state.selection.column() == Some(j) {
                         Some(highlight_cell_style)
                     } else {
                         None
