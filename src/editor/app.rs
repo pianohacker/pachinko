@@ -1,29 +1,25 @@
 use std::{
-    convert::TryFrom,
-    fmt::Display,
-    ops::Deref,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    vec,
 };
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use qualia::{
-    query::QueryNode, CachedMapping, CheckpointId, Object, ObjectShape, Queryable, Store, Q,
-};
+use qualia::{CheckpointId, Queryable, Store};
 use tui::{
     backend::Backend,
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Margin, Rect},
+    layout::{Constraint, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::{Block, Borders, List, ListItem, Paragraph, StatefulWidget, Widget},
+    widgets::{Block, StatefulWidget, Widget},
     Frame,
 };
 
-use crate::types::{FormattedItem, Item};
+use crate::types::Item;
 use crate::AHResult;
 
 use super::sheet::{Row, Sheet, SheetSelection, SheetState};
@@ -35,22 +31,8 @@ pub struct App {
     running: Arc<AtomicBool>,
     search: Option<String>,
     search_in_progress: bool,
-    empty_alt_in_progress: bool,
     editor_table_state: EditorTableState,
     last_table_size: Option<Rect>,
-}
-
-struct DisplayItem {
-    name_highlight_indices: Vec<usize>,
-    item: FormattedItem,
-}
-
-impl Deref for DisplayItem {
-    type Target = FormattedItem;
-
-    fn deref(&self) -> &Self::Target {
-        &self.item
-    }
 }
 
 impl App {
@@ -62,7 +44,6 @@ impl App {
             last_updated_checkpoint: 0,
             search: None,
             search_in_progress: false,
-            empty_alt_in_progress: false,
             editor_table_state: EditorTableState::default(),
             last_table_size: None,
         }
@@ -106,64 +87,16 @@ impl App {
 
         self.last_table_size = Some(inner_size);
 
-        let items: Vec<DisplayItem> = if let Some(search) = &self.search {
-            let matcher = SkimMatcherV2::default();
-
-            let mut result: Vec<_> = self
-                .items
-                .iter()
-                .filter_map(|i| {
-                    matcher
-                        .fuzzy_indices(&i.name, search)
-                        .map(|(score, indices)| (score, indices, i))
-                })
-                .collect();
-
-            result
-                .sort_by_key(|(score, _, i)| (-*score, i.location.name.clone(), i.bin_no, &i.name));
-
-            result
-                .into_iter()
-                .map(|(_, indices, i)| DisplayItem {
-                    item: i.format(),
-                    name_highlight_indices: indices,
-                })
-                .collect()
-        } else {
-            self.items
-                .iter()
-                .map(|i| DisplayItem {
-                    item: i.format(),
-                    name_highlight_indices: Vec::default(),
-                })
-                .collect()
-        };
-
         f.render_stateful_widget(
-            EditorTable::new(items).columns(vec![
+            EditorTable::new(&self.items, self.search.clone()).columns(vec![
                 EditorColumn::new("Location", EditorColumnWidth::Shrink, |i| {
-                    Ok(i.format_location().into())
+                    Ok(i.format().format_location())
                 }),
-                EditorColumn::new("Size", EditorColumnWidth::Shrink, |i| {
-                    Ok(i.size.clone().into())
-                }),
-                EditorColumn::new("Name", EditorColumnWidth::Expand, |i| {
-                    if i.name_highlight_indices.is_empty() {
-                        Ok(i.name.clone().into())
-                    } else {
-                        let mut spans: Vec<_> =
-                            i.name.chars().map(|c| Span::raw(c.to_string())).collect();
-
-                        for idx in &i.name_highlight_indices {
-                            spans[*idx] = Span::styled(
-                                spans[*idx].content.clone(),
-                                Style::default().bg(Color::Indexed(58)),
-                            );
-                        }
-
-                        Ok(Spans::from(spans))
-                    }
-                }),
+                EditorColumn::new("Size", EditorColumnWidth::Shrink, |i: &Item| {
+                    Ok(i.size.clone())
+                })
+                .searchable(false),
+                EditorColumn::new("Name", EditorColumnWidth::Expand, |i| Ok(i.name.clone())),
             ]),
             inner_size,
             &mut self.editor_table_state,
@@ -209,8 +142,9 @@ impl App {
             {
                 match ke.kind {
                     KeyEventKind::Press => {
-                        self.search_in_progress = true;
                         self.search = Some("".to_string());
+                        self.search_in_progress = true;
+                        self.editor_table_state.clear_selection();
                     }
                     KeyEventKind::Release => {
                         self.search_in_progress = false;
@@ -292,33 +226,42 @@ enum EditorColumnWidth {
 
 struct EditorColumn<O> {
     header: String,
-    display: fn(&O) -> AHResult<Spans>,
+    display: fn(&O) -> AHResult<String>,
     width: EditorColumnWidth,
+    searchable: bool,
 }
 
 impl<O> EditorColumn<O> {
     fn new(
         header: impl Into<String>,
         width: EditorColumnWidth,
-        display: fn(&O) -> AHResult<Spans>,
+        display: fn(&O) -> AHResult<String>,
     ) -> Self {
         Self {
             header: header.into(),
             width,
             display,
+            searchable: true,
         }
+    }
+
+    fn searchable(mut self, searchable: bool) -> Self {
+        self.searchable = searchable;
+        self
     }
 }
 
-struct EditorTable<O> {
-    objects: Vec<O>,
+struct EditorTable<'o, O> {
+    objects: &'o Vec<O>,
+    search: Option<String>,
     columns: Vec<EditorColumn<O>>,
 }
 
-impl<O> EditorTable<O> {
-    fn new(objects: impl IntoIterator<Item = O>) -> Self {
+impl<'o, O> EditorTable<'o, O> {
+    fn new(objects: &'o Vec<O>, search: Option<String>) -> Self {
         Self {
-            objects: objects.into_iter().collect(),
+            objects,
+            search,
             columns: vec![],
         }
     }
@@ -401,12 +344,11 @@ impl EditorTableState {
     fn handle_key(&mut self, e: crossterm::event::KeyEvent) {}
 }
 
-impl<O> StatefulWidget for EditorTable<O> {
+impl<'o, O> StatefulWidget for EditorTable<'o, O> {
     type State = EditorTableState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let columns = self.columns;
-
         let rows: Vec<Vec<_>> = self
             .objects
             .iter()
@@ -423,14 +365,72 @@ impl<O> StatefulWidget for EditorTable<O> {
             .enumerate()
             .map(|(i, c)| {
                 std::iter::once(c.header.len())
-                    .chain(rows.iter().map(|r| r[i].width()))
+                    .chain(rows.iter().map(|r| r[i].len()))
                     .max()
                     .unwrap()
             })
             .collect::<Vec<_>>();
 
+        let non_empty_search =
+            self.search
+                .as_ref()
+                .and_then(|s| if s.is_empty() { None } else { Some(s) });
+
+        let displayed_rows: Vec<_> = if let Some(search) = non_empty_search {
+            let matcher = SkimMatcherV2::default();
+
+            let mut scored_result: Vec<_> = rows
+                .iter()
+                .filter_map(|row| {
+                    let column_results: Vec<_> = row
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, c)| {
+                            if !columns[i].searchable {
+                                return (c, 0, vec![]);
+                            }
+
+                            matcher.fuzzy_indices(c, search).map_or_else(
+                                || (c, 0, vec![]),
+                                |(score, indices)| (c, score, indices),
+                            )
+                        })
+                        .collect();
+
+                    let total_score: i64 = column_results.iter().map(|(_, score, _)| score).sum();
+
+                    if total_score == 0 {
+                        return None;
+                    }
+
+                    Some((
+                        total_score,
+                        Row::new(column_results.into_iter().map(|(c, _, indices)| {
+                            let mut spans: Vec<_> =
+                                c.chars().map(|c| Span::raw(c.to_string())).collect();
+
+                            for idx in &indices {
+                                spans[*idx] = Span::styled(
+                                    spans[*idx].content.clone(),
+                                    Style::default().bg(Color::Indexed(58)),
+                                );
+                            }
+
+                            Spans::from(spans)
+                        })),
+                    ))
+                })
+                .collect();
+
+            scored_result.sort_by_key(|(score, _)| -score);
+
+            scored_result.into_iter().map(|(_, i)| i).collect()
+        } else {
+            rows.into_iter().map(|r| Row::new(r)).collect()
+        };
+
         StatefulWidget::render(
-            Sheet::new(rows.into_iter().map(|r| Row::new(r)))
+            Sheet::new(displayed_rows)
                 .highlight_style(
                     Style::default()
                         .add_modifier(Modifier::BOLD)
@@ -468,7 +468,7 @@ impl<O> StatefulWidget for EditorTable<O> {
     }
 }
 
-impl<O> Widget for EditorTable<O> {
+impl<'o, O> Widget for EditorTable<'o, O> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut state = EditorTableState::default();
         StatefulWidget::render(self, area, buf, &mut state);
