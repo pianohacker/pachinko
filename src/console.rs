@@ -248,7 +248,7 @@ impl rustyline::validate::Validator for ConsoleHelper<'_> {}
 pub(crate) fn run_console(opts: CommonOpts) -> AHResult<()> {
     let store = opts.open_store().unwrap();
 
-    let mut rl = Editor::<ConsoleHelper>::new();
+    let mut rl = Editor::<ConsoleHelper>::new()?;
     rl.set_helper(Some(ConsoleHelper { store: &store }));
 
     while let Ok(line) = rl.readline("pachinko> ") {

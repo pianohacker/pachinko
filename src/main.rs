@@ -328,7 +328,7 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
     };
     let prompt = location.name.clone() + &bin_number_display + "> ";
 
-    let mut rl = Editor::<()>::new();
+    let mut rl = Editor::<()>::new()?;
 
     while let Ok(line) = rl.readline(&prompt) {
         let mut name = line.trim().to_string();
