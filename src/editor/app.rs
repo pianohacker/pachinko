@@ -11,11 +11,10 @@ use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use qualia::{CheckpointId, Queryable, Store};
 use tui::{
     backend::Backend,
-    buffer::Buffer,
     layout::{Constraint, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::{Block, StatefulWidget, Widget},
+    widgets::Block,
     Frame,
 };
 
@@ -25,27 +24,28 @@ use crate::AHResult;
 use super::sheet::{Row, Sheet, SheetSelection, SheetState};
 
 pub struct App {
-    store: Store,
-    items: Vec<Item>,
-    last_updated_checkpoint: CheckpointId,
+    column_manager: ColumnManager,
     running: Arc<AtomicBool>,
     search: Option<String>,
     search_in_progress: bool,
-    editor_table_state: EditorTableState,
+    sheet_state: SheetState,
     last_table_size: Option<Rect>,
 }
 
-impl App {
-    pub fn new(store: Store, running: Arc<AtomicBool>) -> Self {
+struct ColumnManager {
+    store: Store,
+    items: Vec<Item>,
+    columns: Vec<ItemColumn>,
+    last_updated_checkpoint: CheckpointId,
+}
+
+impl ColumnManager {
+    fn new(store: Store, columns: Vec<ItemColumn>) -> Self {
         Self {
             store,
-            running,
             items: vec![],
+            columns,
             last_updated_checkpoint: 0,
-            search: None,
-            search_in_progress: false,
-            editor_table_state: EditorTableState::default(),
-            last_table_size: None,
         }
     }
 
@@ -64,293 +64,12 @@ impl App {
         Ok(())
     }
 
-    pub fn render_to<B: Backend>(&mut self, f: &mut Frame<'_, B>) {
-        self.refresh_if_needed().unwrap();
+    fn render(&mut self, search: &Option<String>) -> AHResult<(Row, Vec<Constraint>, Vec<Row>)> {
+        self.refresh_if_needed()?;
 
-        let status = if let Some(search) = &self.search {
-            format!(" - search: \"{}\"", search)
-        } else {
-            "".to_string()
-        };
-
-        let outer_frame = Block::default().title(Span::styled(
-            format!(
-                "{:width$}",
-                format!("Pachinko{}", status),
-                width = f.size().width as usize
-            ),
-            Style::default().add_modifier(Modifier::REVERSED),
-        ));
-        let inner_size = outer_frame.inner(f.size());
-
-        f.render_widget(outer_frame, f.size());
-
-        self.last_table_size = Some(inner_size);
-
-        f.render_stateful_widget(
-            EditorTable::new(&self.items, self.search.clone()).columns(vec![
-                EditorColumn::new("Location", EditorColumnWidth::Shrink, |i| {
-                    Ok(i.format().format_location())
-                }),
-                EditorColumn::new("Size", EditorColumnWidth::Shrink, |i: &Item| {
-                    Ok(i.size.clone())
-                })
-                .searchable(false),
-                EditorColumn::new("Name", EditorColumnWidth::Expand, |i| Ok(i.name.clone())),
-            ]),
-            inner_size,
-            &mut self.editor_table_state,
-        );
-    }
-
-    fn insert_item(&mut self) {
-        if let Some(insertion_point) = self.editor_table_state.insertion_point() {
-            let location = self.items[insertion_point - 1].location.clone();
-
-            self.items.insert(
-                insertion_point,
-                Item {
-                    object_id: None,
-                    name: "".to_string(),
-                    location,
-                    bin_no: 1,
-                    size: "S".to_string(),
-                },
-            );
-            self.editor_table_state.select_row(insertion_point);
-        }
-    }
-
-    pub fn handle(&mut self, ev: Event) {
-        if let Event::Key(ke) = ev {
-            if ke.modifiers.contains(KeyModifiers::CONTROL) && ke.kind == KeyEventKind::Press {
-                if let KeyCode::Char(c) = ke.code {
-                    if !self.search_in_progress {
-                        self.search = Some("".to_string());
-                    }
-
-                    self.search.get_or_insert_with(|| "".to_string()).push(c);
-                    self.search_in_progress = true;
-                    self.editor_table_state.clear_selection();
-
-                    return;
-                }
-            }
-
-            if ke.code == KeyCode::Modifier(ModifierKeyCode::LeftControl)
-                || ke.code == KeyCode::Modifier(ModifierKeyCode::RightControl)
-            {
-                match ke.kind {
-                    KeyEventKind::Press => {
-                        self.search = Some("".to_string());
-                        self.search_in_progress = true;
-                        self.editor_table_state.clear_selection();
-                    }
-                    KeyEventKind::Release => {
-                        self.search_in_progress = false;
-
-                        if let Some(search) = &self.search {
-                            if search.is_empty() {
-                                self.search = None;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                return;
-            }
-        }
-
-        match ev {
-            Event::Key(e) => {
-                if e.kind == KeyEventKind::Press || e.kind == KeyEventKind::Repeat {
-                    match e.code {
-                        KeyCode::F(12) => {
-                            self.running.store(false, Ordering::SeqCst);
-                        }
-                        KeyCode::Up => {
-                            self.editor_table_state.move_up();
-                        }
-                        KeyCode::Down => {
-                            self.editor_table_state.move_down();
-                        }
-                        KeyCode::Left => {
-                            self.editor_table_state.move_left();
-                        }
-                        KeyCode::Right => {
-                            self.editor_table_state.move_right();
-                        }
-                        KeyCode::Esc => {
-                            self.editor_table_state.back_out();
-                        }
-                        KeyCode::PageUp => {
-                            if let Some(table_size) = self.last_table_size {
-                                self.editor_table_state
-                                    .scroll_up((table_size.height as usize).saturating_sub(3));
-                            }
-                        }
-                        KeyCode::PageDown => {
-                            if let Some(table_size) = self.last_table_size {
-                                self.editor_table_state
-                                    .scroll_down((table_size.height as usize).saturating_sub(3));
-                            }
-                        }
-                        KeyCode::Enter if e.modifiers.contains(KeyModifiers::SHIFT) => {
-                            self.insert_item();
-                        }
-                        KeyCode::Char(_) => {
-                            self.editor_table_state.handle_key(e);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Event::Mouse(e) => match e.kind {
-                crossterm::event::MouseEventKind::ScrollUp => {
-                    self.editor_table_state.scroll_up(3);
-                }
-                crossterm::event::MouseEventKind::ScrollDown => {
-                    self.editor_table_state.scroll_down(3);
-                }
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-}
-
-enum EditorColumnWidth {
-    Expand,
-    Shrink,
-}
-
-struct EditorColumn<O> {
-    header: String,
-    display: fn(&O) -> AHResult<String>,
-    width: EditorColumnWidth,
-    searchable: bool,
-}
-
-impl<O> EditorColumn<O> {
-    fn new(
-        header: impl Into<String>,
-        width: EditorColumnWidth,
-        display: fn(&O) -> AHResult<String>,
-    ) -> Self {
-        Self {
-            header: header.into(),
-            width,
-            display,
-            searchable: true,
-        }
-    }
-
-    fn searchable(mut self, searchable: bool) -> Self {
-        self.searchable = searchable;
-        self
-    }
-}
-
-struct EditorTable<'o, O> {
-    objects: &'o Vec<O>,
-    search: Option<String>,
-    columns: Vec<EditorColumn<O>>,
-}
-
-impl<'o, O> EditorTable<'o, O> {
-    fn new(objects: &'o Vec<O>, search: Option<String>) -> Self {
-        Self {
-            objects,
-            search,
-            columns: vec![],
-        }
-    }
-
-    fn columns(mut self, columns: Vec<EditorColumn<O>>) -> Self {
-        self.columns = columns;
-
-        self
-    }
-}
-
-#[derive(Default)]
-struct EditorTableState {
-    table_state: SheetState,
-}
-
-impl EditorTableState {
-    fn move_up(&mut self) {
-        let default_row = self.table_state.get_offset();
-        self.table_state
-            .map_selection(|s| s.map_row_or(default_row, |r| r.saturating_sub(1)));
-    }
-
-    fn move_down(&mut self) {
-        let default_row = self.table_state.get_offset();
-        self.table_state
-            .map_selection(|s| s.map_row_or(default_row, |r| r + 1));
-    }
-
-    fn select_row(&mut self, row: usize) {
-        self.table_state.map_selection(|s| s.with_row(row));
-    }
-
-    fn move_left(&mut self) {
-        use SheetSelection::*;
-        self.table_state.map_selection(|s| match s {
-            None => Cell(0, usize::MAX), // Will get reduced to actual width by table renderer
-            Row(r) => Cell(r, usize::MAX),
-            Cell(r, c) => Cell(r, c.saturating_sub(1)),
-        });
-    }
-
-    fn move_right(&mut self) {
-        use SheetSelection::*;
-        self.table_state.map_selection(|s| match s {
-            None => Cell(0, 0), // Will get reduced to actual width by table renderer
-            Row(r) => Cell(r, 0),
-            Cell(r, c) => Cell(r, c + 1),
-        });
-    }
-
-    fn clear_selection(&mut self) {
-        self.table_state.select(SheetSelection::None);
-    }
-
-    fn back_out(&mut self) {
-        use SheetSelection::*;
-        self.table_state.map_selection(|s| match s {
-            None | Row(_) => None,
-            Cell(r, _) => Row(r),
-        });
-    }
-
-    fn scroll_up(&mut self, delta: usize) {
-        self.table_state.scroll_up(delta)
-    }
-
-    fn scroll_down(&mut self, delta: usize) {
-        self.table_state.scroll_down(delta)
-    }
-
-    fn insertion_point(&self) -> Option<usize> {
-        use SheetSelection::*;
-        match self.table_state.selection() {
-            Row(r) | Cell(r, _) => Option::Some(r + 1),
-            _ => Option::None,
-        }
-    }
-
-    fn handle_key(&mut self, e: crossterm::event::KeyEvent) {}
-}
-
-impl<'o, O> StatefulWidget for EditorTable<'o, O> {
-    type State = EditorTableState;
-
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let columns = self.columns;
+        let columns = &self.columns;
         let rows: Vec<Vec<_>> = self
-            .objects
+            .items
             .iter()
             .map(|o| {
                 columns
@@ -371,10 +90,9 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
             })
             .collect::<Vec<_>>();
 
-        let non_empty_search =
-            self.search
-                .as_ref()
-                .and_then(|s| if s.is_empty() { None } else { Some(s) });
+        let non_empty_search = search
+            .as_ref()
+            .and_then(|s| if s.is_empty() { None } else { Some(s) });
 
         let displayed_rows: Vec<_> = if let Some(search) = non_empty_search {
             let matcher = SkimMatcherV2::default();
@@ -429,7 +147,84 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
             rows.into_iter().map(|r| Row::new(r)).collect()
         };
 
-        StatefulWidget::render(
+        Ok((
+            Row::new(columns.iter().map(|c| c.header.clone()))
+                .style(Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED)),
+            columns
+                .iter()
+                .enumerate()
+                .map(|(i, c)| match c.width {
+                    ItemColumnWidth::Shrink => Constraint::Length(column_widths[i] as u16),
+                    ItemColumnWidth::Expand => Constraint::Min(column_widths[i] as u16),
+                })
+                .collect::<Vec<_>>(),
+            displayed_rows,
+        ))
+    }
+}
+
+impl App {
+    pub fn new(store: Store, running: Arc<AtomicBool>) -> Self {
+        let mut sheet_state = SheetState::default();
+        sheet_state.select(SheetSelection::Char(0, 2, 0));
+
+        Self {
+            column_manager: ColumnManager::new(
+                store,
+                vec![
+                    ItemColumn::new(
+                        "Location",
+                        ItemColumnWidth::Shrink,
+                        ItemColumnKind::Choice,
+                        |i| Ok(i.format().format_location()),
+                    ),
+                    ItemColumn::new(
+                        "Size",
+                        ItemColumnWidth::Shrink,
+                        ItemColumnKind::Choice,
+                        |i: &Item| Ok(i.size.clone()),
+                    )
+                    .searchable(false),
+                    ItemColumn::new(
+                        "Name",
+                        ItemColumnWidth::Expand,
+                        ItemColumnKind::FullText,
+                        |i| Ok(i.name.clone()),
+                    ),
+                ],
+            ),
+            running,
+            search: None,
+            search_in_progress: false,
+            sheet_state,
+            last_table_size: None,
+        }
+    }
+
+    pub fn render_to<B: Backend>(&mut self, f: &mut Frame<'_, B>) {
+        let status = if let Some(search) = &self.search {
+            format!(" - search: \"{}\"", search)
+        } else {
+            "".to_string()
+        };
+
+        let outer_frame = Block::default().title(Span::styled(
+            format!(
+                "{:width$}",
+                format!("Pachinko{}", status),
+                width = f.size().width as usize
+            ),
+            Style::default().add_modifier(Modifier::REVERSED),
+        ));
+        let inner_size = outer_frame.inner(f.size());
+
+        f.render_widget(outer_frame, f.size());
+
+        self.last_table_size = Some(inner_size);
+
+        let (header, column_widths, displayed_rows) =
+            self.column_manager.render(&self.search).unwrap();
+        f.render_stateful_widget(
             Sheet::new(displayed_rows)
                 .highlight_style(
                     Style::default()
@@ -441,36 +236,261 @@ impl<'o, O> StatefulWidget for EditorTable<'o, O> {
                         .add_modifier(Modifier::BOLD)
                         .bg(Color::Indexed(242)),
                 )
-                .header(
-                    Row::new(columns.iter().map(|c| c.header.clone()))
-                        .style(Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED)),
+                .highlight_i_style(
+                    Style::default()
+                        .add_modifier(Modifier::REVERSED)
+                        .bg(Color::Indexed(242)),
                 )
-                .widths(
-                    &columns
-                        .iter()
-                        .enumerate()
-                        .map(|(i, c)| match c.width {
-                            EditorColumnWidth::Shrink => {
-                                Constraint::Length(column_widths[i] as u16)
-                            }
-                            EditorColumnWidth::Expand => Constraint::Min(column_widths[i] as u16),
-                        })
-                        .collect::<Vec<_>>(),
-                )
+                .header(header)
+                .widths(&column_widths)
                 .column_spacing(1),
-            area.inner(&Margin {
+            inner_size.inner(&Margin {
                 horizontal: 1,
                 vertical: 0,
             }),
-            buf,
-            &mut state.table_state,
+            &mut self.sheet_state,
         );
+    }
+
+    //     fn insert_item(&mut self) {
+    //         if let Some(insertion_point) = self.insertion_point() {
+    //             let location = self.items[insertion_point - 1].location.clone();
+
+    //             self.items.insert(
+    //                 insertion_point,
+    //                 Item {
+    //                     object_id: None,
+    //                     name: "".to_string(),
+    //                     location,
+    //                     bin_no: 1,
+    //                     size: "S".to_string(),
+    //                 },
+    //             );
+    //             self.select_row(insertion_point);
+    //         }
+    //     }
+
+    pub fn handle(&mut self, ev: Event) {
+        if let Event::Key(ke) = ev {
+            if ke.modifiers.contains(KeyModifiers::CONTROL) && ke.kind == KeyEventKind::Press {
+                if let KeyCode::Char(c) = ke.code {
+                    if !self.search_in_progress {
+                        self.search = Some("".to_string());
+                    }
+
+                    self.search.get_or_insert_with(|| "".to_string()).push(c);
+                    self.search_in_progress = true;
+                    self.reset_selection();
+
+                    return;
+                }
+            }
+
+            if ke.code == KeyCode::Modifier(ModifierKeyCode::LeftControl)
+                || ke.code == KeyCode::Modifier(ModifierKeyCode::RightControl)
+            {
+                match ke.kind {
+                    KeyEventKind::Press => {
+                        self.search = Some("".to_string());
+                        self.search_in_progress = true;
+                        self.reset_selection();
+                    }
+                    KeyEventKind::Release => {
+                        self.search_in_progress = false;
+
+                        if let Some(search) = &self.search {
+                            if search.is_empty() {
+                                self.search = None;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+        }
+
+        match ev {
+            Event::Key(e) => {
+                if e.kind == KeyEventKind::Press || e.kind == KeyEventKind::Repeat {
+                    match e.code {
+                        KeyCode::F(12) => {
+                            self.running.store(false, Ordering::SeqCst);
+                        }
+                        KeyCode::Up => {
+                            self.move_up();
+                        }
+                        KeyCode::Down => {
+                            self.move_down();
+                        }
+                        KeyCode::Left if e.modifiers == KeyModifiers::ALT => {
+                            self.move_cell_left();
+                        }
+                        KeyCode::Right if e.modifiers == KeyModifiers::ALT => {
+                            self.move_cell_right();
+                        }
+                        KeyCode::Esc => {
+                            self.back_out();
+                        }
+                        KeyCode::PageUp => {
+                            if let Some(table_size) = self.last_table_size {
+                                self.scroll_up((table_size.height as usize).saturating_sub(3));
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            if let Some(table_size) = self.last_table_size {
+                                self.scroll_down((table_size.height as usize).saturating_sub(3));
+                            }
+                        }
+                        // KeyCode::Enter if e.modifiers.contains(KeyModifiers::SHIFT) => {
+                        //     self.insert_item();
+                        // }
+                        KeyCode::Left => {
+                            self.move_char_left();
+                        }
+                        KeyCode::Right => {
+                            self.move_char_right();
+                        }
+                        KeyCode::Char(_) => {
+                            // self.handle_key(e);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Event::Mouse(e) => match e.kind {
+                crossterm::event::MouseEventKind::ScrollUp => {
+                    self.scroll_up(3);
+                }
+                crossterm::event::MouseEventKind::ScrollDown => {
+                    self.scroll_down(3);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn move_up(&mut self) {
+        let default_row = self.sheet_state.get_offset();
+        self.sheet_state
+            .map_selection(|s| s.map_row_or(default_row, |r| r.saturating_sub(1)));
+    }
+
+    fn move_down(&mut self) {
+        let default_row = self.sheet_state.get_offset();
+        self.sheet_state
+            .map_selection(|s| s.map_row_or(default_row, |r| r + 1));
+    }
+
+    fn select_row(&mut self, row: usize) {
+        self.sheet_state.map_selection(|s| s.with_row(row));
+    }
+
+    fn move_cell_left(&mut self) {
+        use SheetSelection::*;
+
+        self.sheet_state.map_selection(|s| {
+            let (new_row, new_col) = match s {
+                None => (0, usize::MAX), // Will get reduced to actual width by table renderer
+                Row(r) => (r, usize::MAX),
+                Cell(r, c) | Char(r, c, _) => (r, c.saturating_sub(1)),
+            };
+
+            Cell(new_row, new_col)
+        });
+    }
+
+    fn move_cell_right(&mut self) {
+        use SheetSelection::*;
+        self.sheet_state.map_selection(|s| match s {
+            None => Cell(0, 0), // Will get reduced to actual width by table renderer
+            Row(r) => Cell(r, 0),
+            Cell(r, c) | Char(r, c, _) => Cell(r, c + 1),
+        });
+    }
+
+    fn reset_selection(&mut self) {
+        self.sheet_state.select(SheetSelection::Char(0, 2, 0));
+    }
+
+    fn back_out(&mut self) {
+        use SheetSelection::*;
+        self.sheet_state.map_selection(|s| match s {
+            None | Row(_) => None,
+            Cell(r, _) | Char(r, _, _) => Row(r),
+        });
+    }
+
+    fn move_char_left(&mut self) {
+        use SheetSelection::*;
+        self.sheet_state.map_selection(|s| match s {
+            None | Row(_) | Cell(_, _) => s,
+            Char(r, c, i) => Char(r, c, i.saturating_sub(1)),
+        });
+    }
+
+    fn move_char_right(&mut self) {
+        use SheetSelection::*;
+        self.sheet_state.map_selection(|s| match s {
+            None | Row(_) | Cell(_, _) => s,
+            Char(r, c, i) => Char(r, c, i + 1),
+        });
+    }
+
+    fn scroll_up(&mut self, delta: usize) {
+        self.sheet_state.scroll_up(delta)
+    }
+
+    fn scroll_down(&mut self, delta: usize) {
+        self.sheet_state.scroll_down(delta)
+    }
+
+    fn insertion_point(&self) -> Option<usize> {
+        use SheetSelection::*;
+        match self.sheet_state.selection() {
+            Row(r) | Cell(r, _) => Option::Some(r + 1),
+            _ => Option::None,
+        }
     }
 }
 
-impl<'o, O> Widget for EditorTable<'o, O> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut state = EditorTableState::default();
-        StatefulWidget::render(self, area, buf, &mut state);
+enum ItemColumnWidth {
+    Expand,
+    Shrink,
+}
+
+enum ItemColumnKind {
+    Choice,
+    FullText,
+}
+
+struct ItemColumn {
+    header: String,
+    width: ItemColumnWidth,
+    kind: ItemColumnKind,
+    display: fn(&Item) -> AHResult<String>,
+    searchable: bool,
+}
+
+impl ItemColumn {
+    fn new(
+        header: impl Into<String>,
+        width: ItemColumnWidth,
+        kind: ItemColumnKind,
+        display: fn(&Item) -> AHResult<String>,
+    ) -> Self {
+        Self {
+            header: header.into(),
+            width,
+            kind,
+            display,
+            searchable: true,
+        }
+    }
+
+    fn searchable(mut self, searchable: bool) -> Self {
+        self.searchable = searchable;
+        self
     }
 }

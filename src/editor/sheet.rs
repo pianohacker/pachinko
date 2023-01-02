@@ -224,6 +224,8 @@ pub struct Sheet<'a> {
     highlight_style: Style,
     /// Style used to render the selected cell
     highlight_cell_style: Style,
+    /// Style used to render the character cursor
+    highlight_i_style: Style,
     /// Symbol in front of the selected rom
     highlight_symbol: Option<&'a str>,
     /// Optional header
@@ -244,6 +246,7 @@ impl<'a> Sheet<'a> {
             column_spacing: 1,
             highlight_style: Style::default(),
             highlight_cell_style: Style::default(),
+            highlight_i_style: Style::default(),
             highlight_symbol: None,
             header: None,
             rows: rows.into_iter().collect(),
@@ -290,6 +293,11 @@ impl<'a> Sheet<'a> {
 
     pub fn highlight_cell_style(mut self, highlight_cell_style: Style) -> Self {
         self.highlight_cell_style = highlight_cell_style;
+        self
+    }
+
+    pub fn highlight_i_style(mut self, highlight_i_style: Style) -> Self {
+        self.highlight_i_style = highlight_i_style;
         self
     }
 
@@ -377,6 +385,7 @@ pub enum SheetSelection {
     None,
     Row(usize),
     Cell(usize, usize),
+    Char(usize, usize, usize),
 }
 
 impl SheetSelection {
@@ -397,14 +406,21 @@ impl SheetSelection {
     pub fn row(&self) -> Option<usize> {
         match *self {
             Self::None => None,
-            Self::Row(r) | Self::Cell(r, _) => Some(r),
+            Self::Row(r) | Self::Cell(r, _) | Self::Char(r, _, _) => Some(r),
         }
     }
 
     pub fn column(&self) -> Option<usize> {
         match *self {
             Self::None | Self::Row(_) => None,
-            Self::Cell(_, c) => Some(c),
+            Self::Cell(_, c) | Self::Char(_, c, _) => Some(c),
+        }
+    }
+
+    pub fn i(&self) -> Option<usize> {
+        match *self {
+            Self::Char(_, _, i) => Some(i),
+            _ => None,
         }
     }
 
@@ -412,6 +428,7 @@ impl SheetSelection {
         match self {
             Self::None | Self::Row(_) => Self::Row(row),
             Self::Cell(_, c) => Self::Cell(row, c),
+            Self::Char(_, c, i) => Self::Char(row, c, i),
         }
     }
 
@@ -420,6 +437,7 @@ impl SheetSelection {
             Self::None => self,
             Self::Row(r) => Self::Row(f(r)),
             Self::Cell(r, c) => Self::Cell(f(r), c),
+            Self::Char(r, c, i) => Self::Char(f(r), c, i),
         }
     }
 
@@ -428,6 +446,7 @@ impl SheetSelection {
             Self::None => Self::Row(default),
             Self::Row(r) => Self::Row(f(r)),
             Self::Cell(r, c) => Self::Cell(f(r), c),
+            Self::Char(r, c, i) => Self::Char(f(r), c, i),
         }
     }
 
@@ -436,6 +455,17 @@ impl SheetSelection {
             Self::None => Self::None,
             Self::Row(r) => Self::Row(r.min(height)),
             Self::Cell(r, c) => Self::Cell(r.min(height), c.min(width)),
+            Self::Char(r, c, i) => Self::Char(r.min(height), c.min(width), i),
+        };
+    }
+
+    fn normalize_char_position(&mut self, cell_len: Option<usize>) {
+        *self = match *self {
+            Self::None | Self::Row(_) | Self::Cell(_, _) => *self,
+            Self::Char(r, c, i) => match cell_len {
+                Some(l) => Self::Char(r, c, l.min(i)),
+                None => Self::Cell(r, c),
+            },
         };
     }
 }
@@ -545,6 +575,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
                         height: max_header_height,
                     },
                     None,
+                    None,
                 );
                 col += *width + self.column_spacing;
             }
@@ -562,6 +593,7 @@ impl<'a> StatefulWidget for Sheet<'a> {
             .normalize(self.widths.len() - 1, self.rows.len() - 1);
 
         let highlight_cell_style = self.highlight_style.patch(self.highlight_cell_style);
+        let highlight_i_style = self.highlight_cell_style.patch(self.highlight_i_style);
 
         let (start, end) = self.get_row_bounds(state.selection.row(), state.offset, rows_height);
         state.last_rows_height = Some(rows_height);
@@ -619,6 +651,14 @@ impl<'a> StatefulWidget for Sheet<'a> {
                     } else {
                         None
                     },
+                    if is_selected
+                        && state.selection.column() == Some(j)
+                        && state.selection.i().is_some()
+                    {
+                        Some((state.selection.i().unwrap(), highlight_i_style))
+                    } else {
+                        None
+                    },
                 );
                 col += *width + self.column_spacing;
             }
@@ -626,7 +666,13 @@ impl<'a> StatefulWidget for Sheet<'a> {
     }
 }
 
-fn render_cell(buf: &mut Buffer, cell: &Cell, area: Rect, highlight_style: Option<Style>) {
+fn render_cell(
+    buf: &mut Buffer,
+    cell: &Cell,
+    area: Rect,
+    highlight_style: Option<Style>,
+    cursor_highlight: Option<(usize, Style)>,
+) {
     buf.set_style(
         area,
         highlight_style.map_or(cell.style, |hs| cell.style.patch(hs)),
@@ -636,6 +682,14 @@ fn render_cell(buf: &mut Buffer, cell: &Cell, area: Rect, highlight_style: Optio
             break;
         }
         buf.set_spans(area.x, area.y + i as u16, spans, area.width);
+    }
+
+    if let Some((i, cursor_style)) = cursor_highlight {
+        let cursor_rect = Rect::new(area.x + i as u16, area.y, 1, 1);
+
+        if cursor_rect.intersects(area) {
+            buf.set_style(cursor_rect, cursor_style);
+        }
     }
 }
 
