@@ -58,26 +58,18 @@ pub fn add_item(
     };
 
     let checkpoint = store.checkpoint()?;
-    checkpoint.add(object!(
-        "type" => "item",
-        "name" => (&name),
-        "location_id" => location.object_id.unwrap(),
-        "bin_no" => bin_number,
-        "size" => size.to_string(),
-    ))?;
-    checkpoint.commit(format!("add item {}", name))?;
+    let item = Item {
+        object_id: None,
+        name,
+        location: location.clone(),
+        bin_no: bin_number,
+        size: size.to_string(),
+        rest: Object::new(),
+    };
+    checkpoint.add(item.clone().into())?;
+    checkpoint.commit(format!("add item {}", item.name))?;
 
-    println!(
-        "{}",
-        Item {
-            object_id: None,
-            location: location.clone(),
-            bin_no: bin_number,
-            name,
-            size: size.to_string(),
-        }
-        .format_with_store(store)?
-    );
+    println!("{}", item.format_with_store(store)?);
 
     Ok(())
 }

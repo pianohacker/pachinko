@@ -24,7 +24,7 @@ use crate::AHResult;
 use super::sheet::{Row, Sheet, SheetSelection, SheetState};
 
 pub struct App {
-    column_manager: ColumnManager,
+    item_column_view_model: ItemColumnViewModel,
     running: Arc<AtomicBool>,
     search: Option<String>,
     search_in_progress: bool,
@@ -32,14 +32,14 @@ pub struct App {
     last_table_size: Option<Rect>,
 }
 
-struct ColumnManager {
+struct ItemColumnViewModel {
     store: Store,
     items: Vec<Item>,
     columns: Vec<ItemColumn>,
     last_updated_checkpoint: CheckpointId,
 }
 
-impl ColumnManager {
+impl ItemColumnViewModel {
     fn new(store: Store, columns: Vec<ItemColumn>) -> Self {
         Self {
             store,
@@ -64,7 +64,10 @@ impl ColumnManager {
         Ok(())
     }
 
-    fn render(&mut self, search: &Option<String>) -> AHResult<(Row, Vec<Constraint>, Vec<Row>)> {
+    fn render(
+        &mut self,
+        search: &Option<String>,
+    ) -> AHResult<(Vec<String>, Vec<Constraint>, Vec<Row>)> {
         self.refresh_if_needed()?;
 
         let columns = &self.columns;
@@ -148,8 +151,7 @@ impl ColumnManager {
         };
 
         Ok((
-            Row::new(columns.iter().map(|c| c.header.clone()))
-                .style(Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED)),
+            columns.iter().map(|c| c.header.clone()).collect(),
             columns
                 .iter()
                 .enumerate()
@@ -161,6 +163,24 @@ impl ColumnManager {
             displayed_rows,
         ))
     }
+
+    fn rightmost_column_index(&self) -> usize {
+        self.columns.len() - 1
+    }
+
+    fn column_index_saturating_add(&self, column_index: usize, offset: isize) -> usize {
+        column_index
+            .saturating_add_signed(offset)
+            .min(self.rightmost_column_index())
+    }
+
+    fn column_allows_char_selection(&self, column_index: usize) -> bool {
+        self.columns[column_index].kind == ItemColumnKind::FullText
+    }
+
+    fn undo(&mut self) {
+        self.store.undo().unwrap();
+    }
 }
 
 impl App {
@@ -169,7 +189,7 @@ impl App {
         sheet_state.select(SheetSelection::Char(0, 2, 0));
 
         Self {
-            column_manager: ColumnManager::new(
+            item_column_view_model: ItemColumnViewModel::new(
                 store,
                 vec![
                     ItemColumn::new(
@@ -223,7 +243,10 @@ impl App {
         self.last_table_size = Some(inner_size);
 
         let (header, column_widths, displayed_rows) =
-            self.column_manager.render(&self.search).unwrap();
+            self.item_column_view_model.render(&self.search).unwrap();
+
+        let selected_column = self.sheet_state.selection().column();
+
         f.render_stateful_widget(
             Sheet::new(displayed_rows)
                 .highlight_style(
@@ -241,7 +264,19 @@ impl App {
                         .add_modifier(Modifier::REVERSED)
                         .bg(Color::Indexed(242)),
                 )
-                .header(header)
+                .header(
+                    Row::new(header.iter().enumerate().map(|(i, h)| {
+                        Span::styled(
+                            h,
+                            if selected_column == Some(i) {
+                                Style::default().add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default()
+                            },
+                        )
+                    }))
+                    .style(Style::default().add_modifier(Modifier::REVERSED)),
+                )
                 .widths(&column_widths)
                 .column_spacing(1),
             inner_size.inner(&Margin {
@@ -317,6 +352,9 @@ impl App {
                         KeyCode::F(12) => {
                             self.running.store(false, Ordering::SeqCst);
                         }
+                        KeyCode::Backspace if e.modifiers == KeyModifiers::ALT => {
+                            self.item_column_view_model.undo();
+                        }
                         KeyCode::Up => {
                             self.move_up();
                         }
@@ -324,10 +362,10 @@ impl App {
                             self.move_down();
                         }
                         KeyCode::Left if e.modifiers == KeyModifiers::ALT => {
-                            self.move_cell_left();
+                            self.move_to_cell_rel(-1);
                         }
                         KeyCode::Right if e.modifiers == KeyModifiers::ALT => {
-                            self.move_cell_right();
+                            self.move_to_cell_rel(1);
                         }
                         KeyCode::Esc => {
                             self.back_out();
@@ -372,41 +410,58 @@ impl App {
     }
 
     fn move_up(&mut self) {
+        use SheetSelection::*;
+
         let default_row = self.sheet_state.get_offset();
-        self.sheet_state
-            .map_selection(|s| s.map_row_or(default_row, |r| r.saturating_sub(1)));
+        self.sheet_state.map_selection(|s| match s {
+            None => Row(default_row),
+            Row(r) => Row(r.saturating_sub(1)),
+            Cell(r, c) => Cell(r.saturating_sub(1), c),
+            Char(r, c, _) => Char(r.saturating_sub(1), c, 0),
+        });
     }
 
     fn move_down(&mut self) {
+        use SheetSelection::*;
+
         let default_row = self.sheet_state.get_offset();
-        self.sheet_state
-            .map_selection(|s| s.map_row_or(default_row, |r| r + 1));
+        self.sheet_state.map_selection(|s| match s {
+            None => Row(default_row),
+            Row(r) => Row(r + 1),
+            Cell(r, c) => Cell(r + 1, c),
+            Char(r, c, _) => Char(r + 1, c, 0),
+        });
     }
 
     fn select_row(&mut self, row: usize) {
         self.sheet_state.map_selection(|s| s.with_row(row));
     }
 
-    fn move_cell_left(&mut self) {
+    fn move_to_cell_rel(&mut self, offset: isize) {
         use SheetSelection::*;
+
+        let item_column_view_model = &self.item_column_view_model;
+        let default_column = if offset < 0 {
+            item_column_view_model.rightmost_column_index()
+        } else {
+            0
+        };
 
         self.sheet_state.map_selection(|s| {
             let (new_row, new_col) = match s {
-                None => (0, usize::MAX), // Will get reduced to actual width by table renderer
-                Row(r) => (r, usize::MAX),
-                Cell(r, c) | Char(r, c, _) => (r, c.saturating_sub(1)),
+                None => (0, default_column),
+                Row(r) => (r, default_column),
+                Cell(r, c) | Char(r, c, _) => (
+                    r,
+                    item_column_view_model.column_index_saturating_add(c, offset),
+                ),
             };
 
-            Cell(new_row, new_col)
-        });
-    }
-
-    fn move_cell_right(&mut self) {
-        use SheetSelection::*;
-        self.sheet_state.map_selection(|s| match s {
-            None => Cell(0, 0), // Will get reduced to actual width by table renderer
-            Row(r) => Cell(r, 0),
-            Cell(r, c) | Char(r, c, _) => Cell(r, c + 1),
+            if item_column_view_model.column_allows_char_selection(new_col) {
+                Char(new_row, new_col, 0)
+            } else {
+                Cell(new_row, new_col)
+            }
         });
     }
 
@@ -455,11 +510,13 @@ impl App {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum ItemColumnWidth {
     Expand,
     Shrink,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum ItemColumnKind {
     Choice,
     FullText,

@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
-use qualia::{object, ObjectShape, ObjectShapeWithId, Queryable, Store};
+use qualia::{object, Object, ObjectShape, ObjectShapeWithId, Queryable, Store};
 
 use crate::AHResult;
 
-#[derive(Clone, ObjectShape)]
+#[derive(Clone, Debug, ObjectShape)]
 #[fixed_fields("type" => "location")]
 pub struct Location {
     pub object_id: Option<i64>,
@@ -12,7 +12,7 @@ pub struct Location {
     pub num_bins: i64,
 }
 
-#[derive(ObjectShape)]
+#[derive(Clone, Debug, ObjectShape)]
 #[fixed_fields("type" => "item")]
 pub struct Item {
     pub object_id: Option<i64>,
@@ -20,6 +20,9 @@ pub struct Item {
     pub location: Location,
     pub bin_no: i64,
     pub size: String,
+
+    #[rest_fields]
+    pub rest: Object,
 }
 
 impl Item {
