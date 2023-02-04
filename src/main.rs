@@ -154,13 +154,17 @@ fn run_add(opts: AddOpts) -> AHResult<()> {
 
     let location = _resolve_location(&store, &opts.location)?;
 
-    add_item(
-        &mut store,
-        opts.name,
-        &location,
-        opts.location.bin,
-        opts.size,
-    )?;
+    println!(
+        "{}",
+        add_item(
+            &mut store,
+            opts.name,
+            &location,
+            opts.location.bin,
+            opts.size,
+        )?
+        .format_with_store(&store)?
+    );
 
     Ok(())
 }
@@ -339,13 +343,17 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
             size = cap[2].parse()?;
         }
 
-        add_item(
-            &mut store,
-            name.to_string(),
-            &location,
-            opts.location.bin,
-            size,
-        )?;
+        println!(
+            "{}",
+            add_item(
+                &mut store,
+                name.to_string(),
+                &location,
+                opts.location.bin,
+                size,
+            )?
+            .format_with_store(&store)?
+        );
     }
 
     Ok(())

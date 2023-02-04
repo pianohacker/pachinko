@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, HashMap},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -8,7 +9,8 @@ use std::{
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use qualia::{CheckpointId, Queryable, Store};
+use indexmap::IndexMap;
+use qualia::{object, CheckpointId, ObjectShapeWithId, Queryable, Store};
 use tui::{
     backend::Backend,
     layout::{Constraint, Margin, Rect},
@@ -18,8 +20,8 @@ use tui::{
     Frame,
 };
 
-use crate::types::Item;
-use crate::AHResult;
+use crate::{types::Item, utils::add_item};
+use crate::{types::ItemSize, AHResult};
 
 use super::sheet::{Row, Sheet, SheetSelection, SheetState};
 
@@ -37,6 +39,8 @@ struct ItemColumnViewModel {
     items: Vec<Item>,
     columns: Vec<ItemColumn>,
     last_updated_checkpoint: CheckpointId,
+    inserted_object_id_chains: Vec<(i64, i64)>,
+    last_rendered_object_ids: Vec<i64>,
 }
 
 impl ItemColumnViewModel {
@@ -46,6 +50,8 @@ impl ItemColumnViewModel {
             items: vec![],
             columns,
             last_updated_checkpoint: 0,
+            inserted_object_id_chains: Vec::new(),
+            last_rendered_object_ids: Vec::new(),
         }
     }
 
@@ -71,14 +77,17 @@ impl ItemColumnViewModel {
         self.refresh_if_needed()?;
 
         let columns = &self.columns;
-        let rows: Vec<Vec<_>> = self
+        let rows: Vec<(i64, Vec<_>)> = self
             .items
             .iter()
             .map(|o| {
-                columns
-                    .iter()
-                    .map(|c| (c.display)(o).unwrap_or("".into()))
-                    .collect()
+                (
+                    o.get_object_id().unwrap(),
+                    columns
+                        .iter()
+                        .map(|c| (c.display)(o).unwrap_or("".into()))
+                        .collect(),
+                )
             })
             .collect();
 
@@ -87,7 +96,7 @@ impl ItemColumnViewModel {
             .enumerate()
             .map(|(i, c)| {
                 std::iter::once(c.header.len())
-                    .chain(rows.iter().map(|r| r[i].len()))
+                    .chain(rows.iter().map(|(_, r)| r[i].len()))
                     .max()
                     .unwrap()
             })
@@ -97,12 +106,12 @@ impl ItemColumnViewModel {
             .as_ref()
             .and_then(|s| if s.is_empty() { None } else { Some(s) });
 
-        let displayed_rows: Vec<_> = if let Some(search) = non_empty_search {
+        let mut displayed_rows: IndexMap<_, _> = if let Some(search) = non_empty_search {
             let matcher = SkimMatcherV2::default();
 
             let mut scored_result: Vec<_> = rows
                 .iter()
-                .filter_map(|row| {
+                .filter_map(|(object_id, row)| {
                     let column_results: Vec<_> = row
                         .into_iter()
                         .enumerate()
@@ -126,6 +135,7 @@ impl ItemColumnViewModel {
 
                     Some((
                         total_score,
+                        object_id,
                         Row::new(column_results.into_iter().map(|(c, _, indices)| {
                             let mut spans: Vec<_> =
                                 c.chars().map(|c| Span::raw(c.to_string())).collect();
@@ -143,12 +153,27 @@ impl ItemColumnViewModel {
                 })
                 .collect();
 
-            scored_result.sort_by_key(|(score, _)| -score);
+            scored_result.sort_by_key(|(score, _, _)| -score);
 
-            scored_result.into_iter().map(|(_, i)| i).collect()
+            scored_result
+                .into_iter()
+                .map(|(_, object_id, i)| (*object_id, i))
+                .collect()
         } else {
-            rows.into_iter().map(|r| Row::new(r)).collect()
+            rows.into_iter()
+                .map(|(object_id, r)| (object_id, Row::new(r)))
+                .collect()
         };
+
+        for (after_object_id, object_id) in self.inserted_object_id_chains.iter() {
+            if let Some(after_index) = displayed_rows.get_index_of(after_object_id) {
+                if let Some(index) = displayed_rows.get_index_of(object_id) {
+                    displayed_rows.move_index(index, after_index + 1);
+                }
+            }
+        }
+
+        self.last_rendered_object_ids = displayed_rows.keys().map(|id| *id).collect();
 
         Ok((
             columns.iter().map(|c| c.header.clone()).collect(),
@@ -160,7 +185,7 @@ impl ItemColumnViewModel {
                     ItemColumnWidth::Expand => Constraint::Min(column_widths[i] as u16),
                 })
                 .collect::<Vec<_>>(),
-            displayed_rows,
+            displayed_rows.into_values().collect(),
         ))
     }
 
@@ -176,6 +201,34 @@ impl ItemColumnViewModel {
 
     fn column_allows_char_selection(&self, column_index: usize) -> bool {
         self.columns[column_index].kind == ItemColumnKind::FullText
+    }
+
+    fn reset_view(&mut self) {
+        self.inserted_object_id_chains.clear();
+    }
+
+    fn insert_item(&mut self, after_index: usize) -> AHResult<()> {
+        let after_object_id = self.last_rendered_object_ids[after_index];
+        let after_item: Item = self
+            .store
+            .query(Item::q().id(after_object_id))
+            .one_converted(&self.store)
+            .unwrap();
+        let last_location = after_item.location.clone();
+
+        let item = add_item(
+            &mut self.store,
+            "".to_string(),
+            &last_location,
+            None,
+            ItemSize::M,
+        )?;
+        let new_object_id = item.get_object_id().unwrap();
+
+        self.inserted_object_id_chains
+            .push((after_item.get_object_id().unwrap(), new_object_id));
+
+        Ok(())
     }
 
     fn undo(&mut self) {
@@ -355,6 +408,11 @@ impl App {
                         KeyCode::Backspace if e.modifiers == KeyModifiers::ALT => {
                             self.item_column_view_model.undo();
                         }
+                        KeyCode::Enter if e.modifiers == KeyModifiers::ALT => {
+                            self.item_column_view_model
+                                .insert_item(self.sheet_state.selection().row().unwrap_or(0))
+                                .unwrap();
+                        }
                         KeyCode::Up => {
                             self.move_up();
                         }
@@ -467,6 +525,7 @@ impl App {
 
     fn reset_selection(&mut self) {
         self.sheet_state.select(SheetSelection::Char(0, 2, 0));
+        self.item_column_view_model.reset_view();
     }
 
     fn back_out(&mut self) {

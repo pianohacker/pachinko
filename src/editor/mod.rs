@@ -1,6 +1,7 @@
 mod app;
 mod sheet;
 
+use clap::lazy_static::lazy_static;
 use crossterm::{
     event::{
         self, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode,
@@ -20,6 +21,12 @@ use tui::{backend::CrosstermBackend, widgets::Block, Terminal};
 
 use crate::{AHResult, CommonOpts};
 
+static CTRLC_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+lazy_static! {
+    static ref RUNNING: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+}
+
 pub(crate) fn run_editor(opts: CommonOpts) -> AHResult<()> {
     let store = opts.open_store().unwrap();
 
@@ -38,18 +45,21 @@ pub(crate) fn run_editor(opts: CommonOpts) -> AHResult<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let running = Arc::new(AtomicBool::new(true));
-
+    RUNNING.store(true, Ordering::SeqCst);
+    if CTRLC_INSTALLED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .map_or_else(|e| e, |a| a)
+        == false
     {
-        let running = running.clone();
+        let running = RUNNING.clone();
         ctrlc::set_handler(move || {
             running.store(false, Ordering::SeqCst);
         })?;
     }
 
-    let mut app = app::App::new(store, running.clone());
+    let mut app = app::App::new(store, RUNNING.clone());
 
-    while running.load(Ordering::SeqCst) {
+    while RUNNING.load(Ordering::SeqCst) {
         terminal.draw(|f| app.render_to(f))?;
         app.handle(read()?);
     }

@@ -42,7 +42,7 @@ pub fn add_item(
     location: &Location,
     bin_no: Option<i64>,
     size: ItemSize,
-) -> AHResult<()> {
+) -> AHResult<Item> {
     let bin_number = match bin_no {
         Some(n) => {
             if n > location.num_bins {
@@ -58,7 +58,7 @@ pub fn add_item(
     };
 
     let checkpoint = store.checkpoint()?;
-    let item = Item {
+    let mut item = Item {
         object_id: None,
         name,
         location: location.clone(),
@@ -66,10 +66,8 @@ pub fn add_item(
         size: size.to_string(),
         rest: Object::new(),
     };
-    checkpoint.add(item.clone().into())?;
+    checkpoint.add_with_id(&mut item)?;
     checkpoint.commit(format!("add item {}", item.name))?;
 
-    println!("{}", item.format_with_store(store)?);
-
-    Ok(())
+    Ok(item)
 }
