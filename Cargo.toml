@@ -24,6 +24,7 @@ ctrlc = { version = "3.2.1", features = ["termination"] }
 unicode-width = "0.1.9"
 fuzzy-matcher = "0.3.7"
 indexmap = "1.9.2"
+unicode-segmentation = "1.10.1"
 
 [dev-dependencies]
 assert_cmd = "1.0" # Test CLI Applications.

@@ -4,19 +4,17 @@ mod sheet;
 use clap::lazy_static::lazy_static;
 use crossterm::{
     event::{
-        self, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode,
-        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self, DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use qualia::{Store, Q};
-use std::io;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::{thread, time::Duration};
+use std::{io, time::Duration};
 use tui::{backend::CrosstermBackend, widgets::Block, Terminal};
 
 use crate::{AHResult, CommonOpts};
@@ -61,7 +59,18 @@ pub(crate) fn run_editor(opts: CommonOpts) -> AHResult<()> {
 
     while RUNNING.load(Ordering::SeqCst) {
         terminal.draw(|f| app.render_to(f))?;
-        app.handle(read()?);
+
+        loop {
+            if event::poll(Duration::from_secs(1))? {
+                if app.handle(event::read()?) {
+                    break;
+                }
+            } else {
+                if app.handle_idle() {
+                    break;
+                }
+            }
+        }
     }
 
     disable_raw_mode()?;

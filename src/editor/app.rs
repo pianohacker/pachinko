@@ -1,16 +1,17 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::{Duration, Instant},
     vec,
 };
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use indexmap::IndexMap;
-use qualia::{object, CheckpointId, ObjectShapeWithId, Queryable, Store};
+use indexmap::{IndexMap, IndexSet};
+use qualia::{CheckpointId, ObjectShapeWithId, Queryable, Store};
 use tui::{
     backend::Backend,
     layout::{Constraint, Margin, Rect},
@@ -19,6 +20,7 @@ use tui::{
     widgets::Block,
     Frame,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{types::Item, utils::add_item};
 use crate::{types::ItemSize, AHResult};
@@ -32,39 +34,83 @@ pub struct App {
     search_in_progress: bool,
     sheet_state: SheetState,
     last_table_size: Option<Rect>,
+    last_action_time: Instant,
 }
 
 struct ItemColumnViewModel {
     store: Store,
-    items: Vec<Item>,
+    items: IndexMap<i64, Item>,
     columns: Vec<ItemColumn>,
     last_updated_checkpoint: CheckpointId,
     inserted_object_id_chains: Vec<(i64, i64)>,
     last_rendered_object_ids: Vec<i64>,
+    edited_items: IndexMap<i64, Item>,
 }
 
 impl ItemColumnViewModel {
     fn new(store: Store, columns: Vec<ItemColumn>) -> Self {
         Self {
             store,
-            items: vec![],
+            items: IndexMap::new(),
             columns,
             last_updated_checkpoint: 0,
             inserted_object_id_chains: Vec::new(),
             last_rendered_object_ids: Vec::new(),
+            edited_items: IndexMap::new(),
         }
     }
 
     fn refresh_if_needed(&mut self) -> AHResult<()> {
         if self.store.modified_since(self.last_updated_checkpoint)? {
             self.last_updated_checkpoint = self.store.last_checkpoint_id()?;
-            self.items = self
+
+            let mut items = self
                 .store
                 .query(Item::q())
-                .iter_converted(&self.store)?
+                .iter_converted::<Item>(&self.store)?
+                .map(|i| (i.get_object_id().unwrap(), i))
                 .collect();
-            self.items
-                .sort_by_key(|i| (i.location.name.clone(), i.bin_no, i.name.clone()))
+
+            if self.items.is_empty() {
+                self.items = items;
+
+                self.items.sort_by(|_, a, _, b| {
+                    (&a.location.name, a.bin_no, &a.name).cmp(&(
+                        &b.location.name,
+                        b.bin_no,
+                        &b.name,
+                    ))
+                });
+            } else {
+                // First, build the list of new items using the order of the old items.
+                // This brings in modifications (by pulling from the new set of items) and
+                // deletions (where item.remove()) will return None.
+                let mut reordered_items: IndexMap<_, _> = self
+                    .items
+                    .keys()
+                    .filter_map(|id| items.remove(id).map(|item| (*id, item)))
+                    .collect();
+
+                // All that remains in `items` is new items.
+                for (object_id, item) in items.into_iter() {
+                    let insert_pos = self
+                        .items
+                        .values()
+                        .collect::<Vec<_>>()
+                        .binary_search_by(|i| {
+                            (&i.location.name, i.bin_no, &i.name).cmp(&(
+                                &item.location.name,
+                                item.bin_no,
+                                &item.name,
+                            ))
+                        })
+                        .map_or_else(|e| e, |o| o);
+                    reordered_items.insert(object_id, item);
+                    reordered_items.move_index(reordered_items.len() - 1, insert_pos);
+                }
+
+                self.items = reordered_items;
+            }
         }
 
         Ok(())
@@ -80,12 +126,13 @@ impl ItemColumnViewModel {
         let rows: Vec<(i64, Vec<_>)> = self
             .items
             .iter()
-            .map(|o| {
+            .map(|(id, o)| {
                 (
-                    o.get_object_id().unwrap(),
+                    *id,
                     columns
                         .iter()
-                        .map(|c| (c.display)(o).unwrap_or("".into()))
+                        .enumerate()
+                        .map(|(i, c)| (c.display)(o).unwrap_or("".into()))
                         .collect(),
                 )
             })
@@ -231,6 +278,64 @@ impl ItemColumnViewModel {
         Ok(())
     }
 
+    fn insert_char(&mut self, row: usize, cell: usize, i: usize, c: char) -> usize {
+        let column_insert_char = match self.columns[cell].insert_char {
+            Some(f) => f,
+            None => return i,
+        };
+
+        let object_id = self.last_rendered_object_ids[row];
+        let item = self.items.get_mut(&object_id).unwrap();
+
+        self.edited_items
+            .entry(object_id)
+            .or_insert_with(|| item.clone());
+
+        column_insert_char(item, i, c)
+    }
+
+    fn delete_char(&mut self, row: usize, cell: usize, i: usize) {
+        let column_delete_char = match self.columns[cell].delete_char {
+            Some(f) => f,
+            None => return,
+        };
+
+        let object_id = self.last_rendered_object_ids[row];
+        let item = self.items.get_mut(&object_id).unwrap();
+
+        self.edited_items
+            .entry(object_id)
+            .or_insert_with(|| item.clone());
+
+        column_delete_char(item, i)
+    }
+
+    fn persist_pending_edits(&mut self) -> bool {
+        if self.edited_items.len() == 0 {
+            return false;
+        }
+
+        let checkpoint = self.store.checkpoint().unwrap();
+        for object_id in self.edited_items.keys() {
+            checkpoint
+                .query(Item::q().id(*object_id))
+                .set(self.items[object_id].clone().into())
+                .unwrap();
+        }
+        let names: Vec<_> = self
+            .edited_items
+            .values()
+            .map(|i| format!("\"{}\"", i.name))
+            .collect();
+        checkpoint
+            .commit(format!("update items: {}", names.join(", ")))
+            .unwrap();
+
+        self.edited_items.clear();
+
+        true
+    }
+
     fn undo(&mut self) {
         self.store.undo().unwrap();
     }
@@ -245,25 +350,59 @@ impl App {
             item_column_view_model: ItemColumnViewModel::new(
                 store,
                 vec![
-                    ItemColumn::new(
-                        "Location",
-                        ItemColumnWidth::Shrink,
-                        ItemColumnKind::Choice,
-                        |i| Ok(i.format().format_location()),
-                    ),
-                    ItemColumn::new(
-                        "Size",
-                        ItemColumnWidth::Shrink,
-                        ItemColumnKind::Choice,
-                        |i: &Item| Ok(i.size.clone()),
-                    )
-                    .searchable(false),
-                    ItemColumn::new(
-                        "Name",
-                        ItemColumnWidth::Expand,
-                        ItemColumnKind::FullText,
-                        |i| Ok(i.name.clone()),
-                    ),
+                    ItemColumn {
+                        header: "Location".to_string(),
+                        width: ItemColumnWidth::Shrink,
+                        kind: ItemColumnKind::Choice,
+                        display: |i| Ok(i.format().format_location()),
+                        insert_char: None,
+                        delete_char: None,
+                        searchable: true,
+                    },
+                    ItemColumn {
+                        header: "Size".to_string(),
+                        width: ItemColumnWidth::Shrink,
+                        kind: ItemColumnKind::Choice,
+                        display: |i: &Item| Ok(i.size.clone()),
+                        insert_char: None,
+                        delete_char: None,
+                        searchable: false,
+                    },
+                    ItemColumn {
+                        header: "Name".to_string(),
+                        width: ItemColumnWidth::Expand,
+                        kind: ItemColumnKind::FullText,
+                        display: |i| Ok(i.name.clone()),
+                        insert_char: Some(|item, i, c| {
+                            item.name.insert(
+                                item.name
+                                    .grapheme_indices(true)
+                                    .nth(i)
+                                    .map_or(item.name.len(), |(offset, _)| offset),
+                                c,
+                            );
+
+                            item.name
+                                .grapheme_indices(true)
+                                .nth(i + 1)
+                                .map_or(item.name.len(), |(offset, _)| offset)
+                        }),
+                        delete_char: Some(|item, i| {
+                            let (from, to) = {
+                                let mut grapheme_indices = item.name.grapheme_indices(true).skip(i);
+
+                                let from = match grapheme_indices.next() {
+                                    Some((i, _)) => i,
+                                    None => return,
+                                };
+
+                                (from, grapheme_indices.next().map(|(i, _)| i))
+                            };
+
+                            item.name.drain(from..to.unwrap_or(item.name.len()));
+                        }),
+                        searchable: true,
+                    },
                 ],
             ),
             running,
@@ -271,6 +410,7 @@ impl App {
             search_in_progress: false,
             sheet_state,
             last_table_size: None,
+            last_action_time: Instant::now(),
         }
     }
 
@@ -358,7 +498,30 @@ impl App {
     //         }
     //     }
 
-    pub fn handle(&mut self, ev: Event) {
+    fn reset_idle(&mut self) {
+        self.last_action_time = Instant::now();
+    }
+
+    fn check_idle(&mut self) -> bool {
+        if Instant::now() - self.last_action_time > Duration::from_millis(1000) {
+            if self.item_column_view_model.persist_pending_edits() {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    pub fn handle(&mut self, ev: Event) -> bool {
+        if self.handle_internal(ev) {
+            self.reset_idle();
+            return true;
+        } else {
+            return self.check_idle();
+        }
+    }
+
+    fn handle_internal(&mut self, ev: Event) -> bool {
         if let Event::Key(ke) = ev {
             if ke.modifiers.contains(KeyModifiers::CONTROL) && ke.kind == KeyEventKind::Press {
                 if let KeyCode::Char(c) = ke.code {
@@ -370,7 +533,7 @@ impl App {
                     self.search_in_progress = true;
                     self.reset_selection();
 
-                    return;
+                    return true;
                 }
             }
 
@@ -392,9 +555,12 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        return false;
+                    }
                 }
-                return;
+
+                return true;
             }
         }
 
@@ -412,6 +578,9 @@ impl App {
                             self.item_column_view_model
                                 .insert_item(self.sheet_state.selection().row().unwrap_or(0))
                                 .unwrap();
+
+                            self.sheet_state
+                                .map_selection(|s| s.map_row_or(0, |r| r + 1));
                         }
                         KeyCode::Up => {
                             self.move_up();
@@ -447,10 +616,44 @@ impl App {
                         KeyCode::Right => {
                             self.move_char_right();
                         }
-                        KeyCode::Char(_) => {
+                        KeyCode::Backspace => {
+                            if let SheetSelection::Char(row, cell, i) = self.sheet_state.selection()
+                            {
+                                if i > 0 {
+                                    let new_i = i - 1;
+                                    self.item_column_view_model.delete_char(row, cell, new_i);
+
+                                    self.sheet_state
+                                        .select(SheetSelection::Char(row, cell, new_i));
+                                }
+                            }
+                        }
+                        KeyCode::Delete => {
+                            if let SheetSelection::Char(row, cell, i) = self.sheet_state.selection()
+                            {
+                                self.item_column_view_model.delete_char(row, cell, i);
+                            }
+                        }
+                        KeyCode::Char(orig_c) => {
+                            let c = if e.modifiers.contains(KeyModifiers::SHIFT) {
+                                orig_c.to_ascii_uppercase()
+                            } else {
+                                orig_c
+                            };
+
+                            if let SheetSelection::Char(row, cell, i) = self.sheet_state.selection()
+                            {
+                                let new_i =
+                                    self.item_column_view_model.insert_char(row, cell, i, c);
+
+                                self.sheet_state
+                                    .select(SheetSelection::Char(row, cell, new_i));
+                            }
                             // self.handle_key(e);
                         }
-                        _ => {}
+                        _ => {
+                            return false;
+                        }
                     }
                 }
             }
@@ -461,10 +664,20 @@ impl App {
                 crossterm::event::MouseEventKind::ScrollDown => {
                     self.scroll_down(3);
                 }
-                _ => {}
+                _ => {
+                    return false;
+                }
             },
-            _ => {}
+            _ => {
+                return false;
+            }
         }
+
+        true
+    }
+
+    pub fn handle_idle(&mut self) -> bool {
+        self.check_idle()
     }
 
     fn move_up(&mut self) {
@@ -586,27 +799,7 @@ struct ItemColumn {
     width: ItemColumnWidth,
     kind: ItemColumnKind,
     display: fn(&Item) -> AHResult<String>,
+    insert_char: Option<fn(&mut Item, usize, char) -> usize>,
+    delete_char: Option<fn(&mut Item, usize)>,
     searchable: bool,
-}
-
-impl ItemColumn {
-    fn new(
-        header: impl Into<String>,
-        width: ItemColumnWidth,
-        kind: ItemColumnKind,
-        display: fn(&Item) -> AHResult<String>,
-    ) -> Self {
-        Self {
-            header: header.into(),
-            width,
-            kind,
-            display,
-            searchable: true,
-        }
-    }
-
-    fn searchable(mut self, searchable: bool) -> Self {
-        self.searchable = searchable;
-        self
-    }
 }

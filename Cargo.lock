@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "crossterm"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "bitflags",
  "crossterm_winapi",
@@ -672,7 +672,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
- "crossterm 0.25.0",
+ "crossterm 0.26.0",
  "ctrlc",
  "dirs",
  "fuzzy-matcher",
@@ -687,6 +687,7 @@ dependencies = [
  "shell-words",
  "tempfile",
  "tui",
+ "unicode-segmentation",
  "unicode-width",
 ]
 
@@ -1225,9 +1226,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-segmentation"
-version = "1.7.1"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb0d2e7be6ae3a5fa87eed5fb451aff96f2573d2694942e40543ae0bbe19c796"
+checksum = "1dd624098567895118886609431a7c3b8f516e41d30e0643f03d94592a147e36"
 
 [[package]]
 name = "unicode-width"
