@@ -326,21 +326,16 @@ impl ItemColumnViewModel {
             return false;
         }
 
-        let checkpoint = self.store.checkpoint().unwrap();
         for object_id in self.edited_items.keys() {
+            let checkpoint = self.store.checkpoint().unwrap();
             checkpoint
                 .query(Item::q().id(*object_id))
                 .set(self.items[object_id].clone().into())
                 .unwrap();
+            checkpoint
+                .commit(format!("update item: {}", self.items[object_id].name))
+                .unwrap();
         }
-        let names: Vec<_> = self
-            .edited_items
-            .values()
-            .map(|i| format!("\"{}\"", i.name))
-            .collect();
-        checkpoint
-            .commit(format!("update items: {}", names.join(", ")))
-            .unwrap();
 
         self.edited_items.clear();
 
@@ -839,9 +834,14 @@ impl App {
 
     fn move_char_right(&mut self) {
         use SheetSelection::*;
+        let item_column_view_model = &self.item_column_view_model;
         self.sheet_state.map_selection(|s| match s {
             None | Row(_) | Cell(_, _) => s,
-            Char(r, c, i) => Char(r, c, i + 1),
+            Char(r, c, i) => Char(
+                r,
+                c,
+                (i + 1).min(item_column_view_model.get_column_len(r, c).unwrap_or(0)),
+            ),
         });
     }
 
