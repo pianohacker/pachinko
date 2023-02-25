@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    convert::TryFrom,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -48,54 +49,60 @@ impl ItemColumnViewModel {
         }
     }
 
-    fn refresh_if_needed(&mut self) -> AHResult<()> {
-        if self.store.modified_since(self.last_updated_checkpoint)? {
-            self.last_updated_checkpoint = self.store.last_checkpoint_id()?;
+    fn refresh(&mut self) -> AHResult<()> {
+        self.last_updated_checkpoint = self.store.last_checkpoint_id()?;
 
-            let mut items = self
-                .store
-                .query(Item::q())
-                .iter_converted::<Item>(&self.store)?
-                .map(|i| (i.get_object_id().unwrap(), i))
+        let mut items = self
+            .store
+            .query(Item::q())
+            .iter_converted::<Item>(&self.store)?
+            .map(|i| (i.get_object_id().unwrap(), i))
+            .collect();
+
+        if self.items.is_empty() {
+            self.items = items;
+
+            self.reset_view_order();
+        } else {
+            // First, build the list of new items using the order of the old items.
+            // This brings in modifications (by pulling from the new set of items) and
+            // deletions (where item.remove()) will return None.
+            let mut reordered_items: IndexMap<_, _> = self
+                .items
+                .keys()
+                .filter_map(|id| items.remove(id).map(|item| (*id, item)))
                 .collect();
 
-            if self.items.is_empty() {
-                self.items = items;
-
-                self.reset_view_order();
-            } else {
-                // First, build the list of new items using the order of the old items.
-                // This brings in modifications (by pulling from the new set of items) and
-                // deletions (where item.remove()) will return None.
-                let mut reordered_items: IndexMap<_, _> = self
+            // All that remains in `items` is new items.
+            for (object_id, item) in items.into_iter() {
+                let insert_pos = self
                     .items
-                    .keys()
-                    .filter_map(|id| items.remove(id).map(|item| (*id, item)))
-                    .collect();
-
-                // All that remains in `items` is new items.
-                for (object_id, item) in items.into_iter() {
-                    let insert_pos = self
-                        .items
-                        .values()
-                        .collect::<Vec<_>>()
-                        .binary_search_by(|i| {
-                            (&i.location.name, i.bin_no, &i.name).cmp(&(
-                                &item.location.name,
-                                item.bin_no,
-                                &item.name,
-                            ))
-                        })
-                        .map_or_else(|e| e, |o| o);
-                    reordered_items.insert(object_id, item);
-                    reordered_items.move_index(reordered_items.len() - 1, insert_pos);
-                }
-
-                self.items = reordered_items;
+                    .values()
+                    .collect::<Vec<_>>()
+                    .binary_search_by(|i| {
+                        (&i.location.name, i.bin_no, &i.name).cmp(&(
+                            &item.location.name,
+                            item.bin_no,
+                            &item.name,
+                        ))
+                    })
+                    .map_or_else(|e| e, |o| o);
+                reordered_items.insert(object_id, item);
+                reordered_items.move_index(reordered_items.len() - 1, insert_pos);
             }
+
+            self.items = reordered_items;
         }
 
         Ok(())
+    }
+
+    fn refresh_if_needed(&mut self) -> AHResult<()> {
+        if self.store.modified_since(self.last_updated_checkpoint)? {
+            self.refresh()
+        } else {
+            Ok(())
+        }
     }
 
     fn render(
@@ -386,7 +393,15 @@ impl App {
                         header: "Size".to_string(),
                         width: ItemColumnWidth::Shrink,
                         kind: ItemColumnKind::Choice,
-                        display: |i: &Item| Ok(i.size.clone()),
+                        display: |i: &Item| {
+                            Ok(match i.size.parse()? {
+                                ItemSize::S => "Sm",
+                                ItemSize::M => "Md",
+                                ItemSize::L => "Lg",
+                                ItemSize::X => "XL",
+                            }
+                            .to_string())
+                        },
                         insert_char: None,
                         delete_char: None,
                         searchable: false,
