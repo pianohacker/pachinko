@@ -13,18 +13,24 @@ mod utils;
 
 use anyhow::{anyhow, bail, Context, Result as AHResult};
 use clap::Clap;
+use git_version::git_version;
 use qualia::object;
 use qualia::{Object, Store, Q};
 use rustyline::Editor;
-use std::env;
 
 use crate::console::run_console;
 use crate::editor::run_editor;
 use crate::types::{parse_bin_number, Item, ItemLocation, ItemSize, Location};
 use crate::utils::add_item;
 
+const PACHINKO_VERSION: &str = git_version!(
+    suffix = "-git",
+    cargo_suffix = "-cargo",
+    fallback = "unknown"
+);
+
 #[derive(Clap)]
-#[clap(version = env!("CARGO_PKG_VERSION"))]
+#[clap(version = PACHINKO_VERSION)]
 struct Opts {
     #[clap(subcommand)]
     subcmd: SubCommand,
@@ -32,34 +38,34 @@ struct Opts {
 
 #[derive(Clap)]
 enum SubCommand {
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Add an item", visible_alias = "a")]
+    #[clap(version = PACHINKO_VERSION, about = "Add an item", visible_alias = "a")]
     Add(AddOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Add a location")]
+    #[clap(version = PACHINKO_VERSION, about = "Add a location")]
     AddLocation(AddLocationOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Run several commands from an interactive console", visible_alias = "c")]
+    #[clap(version = PACHINKO_VERSION, about = "Run several commands from an interactive console", visible_alias = "c")]
     Console(CommonOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Delete an item", visible_alias = "d")]
+    #[clap(version = PACHINKO_VERSION, about = "Delete an item", visible_alias = "d")]
     Delete(DeleteOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Dump database contents")]
+    #[clap(version = PACHINKO_VERSION, about = "Dump database contents")]
     Dump(CommonOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Edit and view items", visible_alias = "qa")]
+    #[clap(version = PACHINKO_VERSION, about = "Edit and view items", visible_alias = "qa")]
     Editor(CommonOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing items", visible_alias = "i")]
+    #[clap(version = PACHINKO_VERSION, about = "Show existing items", visible_alias = "i")]
     Items(ItemsOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Show existing locations")]
+    #[clap(version = PACHINKO_VERSION, about = "Show existing locations")]
     Locations(CommonOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Quickly add several items to a location", visible_alias = "qa")]
+    #[clap(version = PACHINKO_VERSION, about = "Quickly add several items to a location", visible_alias = "qa")]
     Quickadd(QuickaddOpts),
 
-    #[clap(version = env!("CARGO_PKG_VERSION"), about = "Undo the last action", visible_alias = "u")]
+    #[clap(version = PACHINKO_VERSION, about = "Undo the last action", visible_alias = "u")]
     Undo(CommonOpts),
 }
 
