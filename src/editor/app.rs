@@ -1,6 +1,4 @@
 use std::{
-    collections::HashMap,
-    convert::TryFrom,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -11,14 +9,14 @@ use std::{
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use qualia::{CheckpointId, ObjectShapeWithId, Queryable, Store};
 use tui::{
     backend::Backend,
     layout::{Constraint, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::Block,
+    widgets::{Block, Borders, Clear},
     Frame,
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -369,6 +367,7 @@ pub struct App {
     last_table_size: Option<Rect>,
     last_action_time: Instant,
     action_description: Option<(Instant, String)>,
+    help_shown: bool,
 }
 
 impl App {
@@ -450,6 +449,7 @@ impl App {
             last_table_size: None,
             last_action_time: Instant::now(),
             action_description: None,
+            help_shown: false,
         }
     }
 
@@ -464,13 +464,14 @@ impl App {
         let title_width = f.size().width as usize;
         let action_description = if let Some((at, description)) = &self.action_description {
             if Instant::now().saturating_duration_since(*at).as_secs() < 5 {
-                description.clone()
+                Some(description.clone())
             } else {
-                "".to_string()
+                None
             }
         } else {
-            "".to_string()
-        };
+            None
+        }
+        .unwrap_or("F1 for help".to_string());
 
         let outer_frame = Block::default().title(Span::styled(
             format!(
@@ -530,6 +531,50 @@ impl App {
             }),
             &mut self.sheet_state,
         );
+
+        if self.help_shown {
+            let help_frame = Block::default()
+                .title(Span::styled(
+                    " Help ",
+                    Style::default()
+                        .bg(Color::Black)
+                        .add_modifier(Modifier::REVERSED),
+                ))
+                .borders(Borders::ALL);
+            let help_frame_size = f.size().inner(&Margin {
+                horizontal: 1,
+                vertical: 1,
+            });
+            let help_size = help_frame.inner(help_frame_size);
+
+            f.render_widget(help_frame, help_frame_size);
+
+            f.render_widget(Clear, help_size);
+
+            let help_rows = &[
+                &["F1", "Show/hide this help screen"],
+                &["F5", "Refresh the list of items"],
+                &["F12", "Quit"],
+                &["Up/Down", "Move between rows"],
+                &["Left/Right", "Move through text"],
+                &["Alt+Left/Right", "Move between columns"],
+                &["Alt+Backspace", "Undo the last change"],
+                &["Alt+Delete", "Delete the current item"],
+                &["Alt+Enter", "Create a new item"],
+            ];
+            f.render_widget(
+                Sheet::new(
+                    help_rows.into_iter().map(|r| {
+                        Row::new(r.into_iter().map(|c| c.to_string()).collect::<Vec<_>>())
+                    }),
+                )
+                .widths(&[Constraint::Length(16), Constraint::Min(0)]),
+                help_size.inner(&Margin {
+                    horizontal: 1,
+                    vertical: 0,
+                }),
+            );
+        }
     }
 
     //     fn insert_item(&mut self) {
@@ -620,6 +665,12 @@ impl App {
             Event::Key(e) => {
                 if e.kind == KeyEventKind::Press || e.kind == KeyEventKind::Repeat {
                     match e.code {
+                        KeyCode::F(1) => {
+                            self.help_shown = !self.help_shown;
+                        }
+                        KeyCode::F(5) => {
+                            self.item_column_view_model.refresh().unwrap();
+                        }
                         KeyCode::F(12) => {
                             self.running.store(false, Ordering::SeqCst);
                         }
@@ -771,10 +822,6 @@ impl App {
             Cell(r, c) => Cell(r + 1, c),
             Char(r, c, _) => Char(r + 1, c, 0),
         });
-    }
-
-    fn select_row(&mut self, row: usize) {
-        self.sheet_state.map_selection(|s| s.with_row(row));
     }
 
     fn move_to_cell_rel(&mut self, offset: isize) {

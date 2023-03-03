@@ -22,9 +22,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::io;
-
-use crossterm::{cursor, execute};
 use tui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
@@ -427,14 +424,6 @@ impl SheetSelection {
         }
     }
 
-    pub fn with_row(self, row: usize) -> Self {
-        match self {
-            Self::None | Self::Row(_) => Self::Row(row),
-            Self::Cell(_, c) => Self::Cell(row, c),
-            Self::Char(_, c, i) => Self::Char(row, c, i),
-        }
-    }
-
     pub fn map_row(self, f: impl FnOnce(usize) -> usize) -> Self {
         match self {
             Self::None => self,
@@ -459,16 +448,6 @@ impl SheetSelection {
             Self::Row(r) => Self::Row(r.min(height)),
             Self::Cell(r, c) => Self::Cell(r.min(height), c.min(width)),
             Self::Char(r, c, i) => Self::Char(r.min(height), c.min(width), i),
-        };
-    }
-
-    fn normalize_char_position(&mut self, cell_len: Option<usize>) {
-        *self = match *self {
-            Self::None | Self::Row(_) | Self::Cell(_, _) => *self,
-            Self::Char(r, c, i) => match cell_len {
-                Some(l) => Self::Char(r, c, l.min(i)),
-                None => Self::Cell(r, c),
-            },
         };
     }
 }
@@ -504,11 +483,6 @@ impl SheetState {
 
     pub fn get_offset(&self) -> usize {
         self.offset
-    }
-
-    pub fn set_offset(&mut self, offset: usize) {
-        self.selection = self.selection.with_row(offset);
-        self.offset = offset;
     }
 
     pub fn scroll_up(&mut self, delta: usize) {
