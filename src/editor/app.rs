@@ -401,7 +401,14 @@ impl App {
                             }
                             .to_string())
                         },
-                        insert_char: None,
+                        insert_char: Some(|item, _, c| {
+                            match c.to_ascii_lowercase() {
+                                's' | 'm' | 'l' | 'x' => item.size = c.to_string(),
+                                _ => {}
+                            };
+
+                            0
+                        }),
                         delete_char: None,
                         searchable: false,
                     },
@@ -761,15 +768,19 @@ impl App {
                                 orig_c
                             };
 
-                            if let SheetSelection::Char(row, cell, i) = self.sheet_state.selection()
-                            {
-                                let new_i =
-                                    self.item_column_view_model.insert_char(row, cell, i, c);
+                            match self.sheet_state.selection() {
+                                SheetSelection::Char(row, cell, i) => {
+                                    let new_i =
+                                        self.item_column_view_model.insert_char(row, cell, i, c);
 
-                                self.sheet_state
-                                    .select(SheetSelection::Char(row, cell, new_i));
+                                    self.sheet_state
+                                        .select(SheetSelection::Char(row, cell, new_i));
+                                }
+                                SheetSelection::Cell(row, cell) => {
+                                    self.item_column_view_model.insert_char(row, cell, 0, c);
+                                }
+                                _ => {}
                             }
-                            // self.handle_key(e);
                         }
                         _ => {
                             return false;
