@@ -24,8 +24,10 @@ use crate::types::{parse_bin_number, Item, ItemLocation, ItemSize, Location};
 use crate::utils::add_item;
 
 const PACHINKO_VERSION: &str = git_version!(
-    suffix = "-git",
-    cargo_suffix = "-cargo",
+    prefix = "",
+    suffix = "",
+    cargo_prefix = "",
+    cargo_suffix = "",
     fallback = "unknown"
 );
 
