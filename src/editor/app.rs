@@ -799,6 +799,7 @@ impl App {
                     return false;
                 }
             },
+            Event::Resize(..) => {}
             _ => {
                 return false;
             }
