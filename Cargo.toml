@@ -11,7 +11,7 @@ license = "MPL-2.0"
 [dependencies]
 qualia = "0.15"
 anyhow = "1.0" # Flexible concrete Error type built on std::error::Error
-clap = "3.0.0-beta.2"
+clap = { version = "4.2.1", features = ["derive", "env"] }
 dirs = "1.0"
 rustyline = "10.0.0"
 regex = "1.4" # An implementation of regular expressions for Rust. This implementation uses finite automata and gua…
@@ -30,6 +30,7 @@ indexmap = "1.9.2"
 unicode-segmentation = "1.10.1"
 git-version = "0.3.5"
 nix = "0.26.2"
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 assert_cmd = "1.0" # Test CLI Applications.

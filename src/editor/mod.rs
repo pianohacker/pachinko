@@ -1,7 +1,6 @@
 mod app;
 mod sheet;
 
-use clap::lazy_static::lazy_static;
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
@@ -10,6 +9,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use lazy_static::lazy_static;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,

@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context};
-use clap::Clap;
+use clap::ValueEnum;
 use qualia::{object, Object, ObjectShape, ObjectShapeWithId, Queryable, Store};
 use std::str::FromStr;
 
@@ -78,7 +78,7 @@ impl std::fmt::Display for FormattedItem {
 }
 
 pub fn parse_bin_number(s: &str) -> AHResult<i64> {
-    Ok(s.parse::<i64>()
+    s.parse::<i64>()
         .context("failed to parse bin number")
         .and_then(|x| {
             if x > 0 {
@@ -86,9 +86,14 @@ pub fn parse_bin_number(s: &str) -> AHResult<i64> {
             } else {
                 Err(anyhow!("must be greater than zero"))
             }
-        })?)
+        })
 }
 
+pub fn bin_number_value_parser(s: &str) -> Result<i64, String> {
+    parse_bin_number(s).map_err(|e| e.to_string())
+}
+
+#[derive(Clone)]
 pub struct ItemLocation {
     pub location: String,
     pub bin: Option<i64>,
@@ -119,7 +124,7 @@ impl FromStr for ItemLocation {
     }
 }
 
-#[derive(Clap, Debug, PartialEq)]
+#[derive(Copy, Clone, ValueEnum, Debug, PartialEq)]
 #[clap(rename_all = "screaming_snake")]
 pub enum ItemSize {
     S,
@@ -170,7 +175,7 @@ mod tests {
 
     #[test]
     fn item_size_parsing_should_succeed_for_lowercase_sizes() {
-        assert_eq!(ItemSize::from_str("s").unwrap(), ItemSize::S);
-        assert_eq!(ItemSize::from_str("m").unwrap(), ItemSize::M);
+        assert_eq!("s".parse::<ItemSize>().unwrap(), ItemSize::S);
+        assert_eq!("m".parse::<ItemSize>().unwrap(), ItemSize::M);
     }
 }

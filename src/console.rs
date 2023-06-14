@@ -1,23 +1,23 @@
-use clap::{AppSettings, Clap};
+use clap::{Parser, Subcommand};
 use qualia::{Store, Q};
 use regex::Regex;
 use rustyline::Editor;
 use shell_words;
 use std::borrow::Cow;
 
-use crate::{AHResult, CommonOpts, SubCommand};
+use crate::{AHResult, CommonOpts, SubCmd};
 
-#[derive(Clap)]
-#[clap(setting = AppSettings::NoBinaryName)]
+#[derive(Parser)]
+#[clap(no_binary_name = true)]
 struct ConsoleOpts {
     #[clap(subcommand)]
     subcmd: ConsoleSubCommand,
 }
 
-#[derive(Clap)]
+#[derive(Subcommand)]
 enum ConsoleSubCommand {
     #[clap(flatten)]
-    Base(SubCommand),
+    Base(SubCmd),
 
     #[clap(about = "Quit the console")]
     Quit,
@@ -147,7 +147,7 @@ struct ConsoleHelper<'store> {
 impl<'store> ConsoleHelper<'store> {
     fn positional_completion_candidates(&self, argument_name: impl AsRef<str>) -> Vec<String> {
         match argument_name.as_ref() {
-            "name-pattern" => self
+            "name_pattern" => self
                 .store
                 .query(Q.equal("type", "item"))
                 .iter_converted::<crate::types::Item>(&self.store)
@@ -167,7 +167,7 @@ impl<'store> ConsoleHelper<'store> {
 
     fn completion_candidates(&self, words: &Vec<InputWord>) -> Vec<String> {
         let mut words = words.clone();
-        let mut app = &<ConsoleOpts as clap::IntoApp>::into_app();
+        let mut app = &<ConsoleOpts as clap::CommandFactory>::command();
 
         while words.len() > 1 {
             if let Some(sc) = app
@@ -189,7 +189,7 @@ impl<'store> ConsoleHelper<'store> {
                 .map(|sc| sc.get_name().to_string())
                 .collect()
         } else if cur_word < positional_args.len() {
-            self.positional_completion_candidates(positional_args[cur_word].get_name())
+            self.positional_completion_candidates(positional_args[cur_word].get_id().as_str())
         } else {
             vec![]
         };
@@ -260,7 +260,7 @@ pub(crate) fn run_console(opts: CommonOpts) -> AHResult<()> {
             }
 
             if words[0] == "help" {
-                <ConsoleOpts as clap::IntoApp>::into_app()
+                <ConsoleOpts as clap::CommandFactory>::command()
                     .help_template("Available commands:\n{subcommands}")
                     .print_help()?;
 
@@ -271,7 +271,7 @@ pub(crate) fn run_console(opts: CommonOpts) -> AHResult<()> {
 
             match console_opts.subcmd {
                 ConsoleSubCommand::Quit => Ok(false),
-                ConsoleSubCommand::Base(SubCommand::Console(_)) => Ok(true),
+                ConsoleSubCommand::Base(SubCmd::Console(_)) => Ok(true),
                 ConsoleSubCommand::Base(sc) => sc.invoke().map(|_| true),
             }
         }()

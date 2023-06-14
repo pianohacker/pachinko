@@ -12,7 +12,7 @@ mod types;
 mod utils;
 
 use anyhow::{anyhow, bail, Context, Result as AHResult};
-use clap::Clap;
+use clap::{Args, Parser, Subcommand};
 use git_version::git_version;
 use qualia::object;
 use qualia::{Object, Store, Q};
@@ -20,7 +20,7 @@ use rustyline::Editor;
 
 use crate::console::run_console;
 use crate::editor::run_editor;
-use crate::types::{parse_bin_number, Item, ItemLocation, ItemSize, Location};
+use crate::types::{bin_number_value_parser, Item, ItemLocation, ItemSize, Location};
 use crate::utils::add_item;
 
 const PACHINKO_VERSION: &str = git_version!(
@@ -31,15 +31,15 @@ const PACHINKO_VERSION: &str = git_version!(
     fallback = "unknown"
 );
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = PACHINKO_VERSION)]
 struct Opts {
     #[clap(subcommand)]
-    subcmd: SubCommand,
+    subcmd: SubCmd,
 }
 
-#[derive(Clap)]
-enum SubCommand {
+#[derive(Subcommand)]
+enum SubCmd {
     #[clap(version = PACHINKO_VERSION, about = "Add an item", visible_alias = "a")]
     Add(AddOpts),
 
@@ -55,7 +55,7 @@ enum SubCommand {
     #[clap(version = PACHINKO_VERSION, about = "Dump database contents")]
     Dump(CommonOpts),
 
-    #[clap(version = PACHINKO_VERSION, about = "Edit and view items", visible_alias = "qa")]
+    #[clap(version = PACHINKO_VERSION, about = "Edit and view items", visible_alias = "e")]
     Editor(CommonOpts),
 
     #[clap(version = PACHINKO_VERSION, about = "Show existing items", visible_alias = "i")]
@@ -71,24 +71,24 @@ enum SubCommand {
     Undo(CommonOpts),
 }
 
-impl SubCommand {
+impl SubCmd {
     fn invoke(self) -> AHResult<()> {
         match self {
-            SubCommand::Add(o) => run_add(o),
-            SubCommand::AddLocation(o) => run_add_location(o),
-            SubCommand::Delete(o) => run_delete(o),
-            SubCommand::Dump(o) => run_dump(o),
-            SubCommand::Console(o) => run_console(o),
-            SubCommand::Editor(o) => run_editor(o),
-            SubCommand::Items(o) => run_items(o),
-            SubCommand::Locations(o) => run_locations(o),
-            SubCommand::Quickadd(o) => run_quickadd(o),
-            SubCommand::Undo(o) => run_undo(o),
+            SubCmd::Add(o) => run_add(o),
+            SubCmd::AddLocation(o) => run_add_location(o),
+            SubCmd::Delete(o) => run_delete(o),
+            SubCmd::Dump(o) => run_dump(o),
+            SubCmd::Console(o) => run_console(o),
+            SubCmd::Editor(o) => run_editor(o),
+            SubCmd::Items(o) => run_items(o),
+            SubCmd::Locations(o) => run_locations(o),
+            SubCmd::Quickadd(o) => run_quickadd(o),
+            SubCmd::Undo(o) => run_undo(o),
         }
     }
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct CommonOpts {
     #[clap(long, env = "PACHINKO_STORE_PATH")]
     store_path: Option<String>,
@@ -121,7 +121,7 @@ trait WithCommonOpts {
     fn common_opts(&self) -> &CommonOpts;
 }
 
-#[derive(Clap)]
+#[derive(Args)]
 struct AddOpts {
     #[clap(flatten)]
     common: CommonOpts,
@@ -129,7 +129,7 @@ struct AddOpts {
     location: ItemLocation,
     #[clap()]
     name: String,
-    #[clap(arg_enum, default_value = "S")]
+    #[clap(value_enum, default_value = "S")]
     size: ItemSize,
 }
 
@@ -177,14 +177,14 @@ fn run_add(opts: AddOpts) -> AHResult<()> {
     Ok(())
 }
 
-#[derive(Clap)]
+#[derive(Args)]
 struct AddLocationOpts {
     #[clap(flatten)]
     common: CommonOpts,
     #[clap()]
     name: String,
-    #[clap(parse(from_str = parse_bin_number))]
-    num_bins: AHResult<i64>,
+    #[clap(value_parser = bin_number_value_parser)]
+    num_bins: i64,
 }
 
 impl WithCommonOpts for AddLocationOpts {
@@ -200,7 +200,7 @@ fn run_add_location(opts: AddLocationOpts) -> AHResult<()> {
     checkpoint.add(object!(
         "type" => "location",
         "name" => &opts.name,
-        "num_bins" => opts.num_bins?,
+        "num_bins" => opts.num_bins,
     ))?;
     checkpoint.commit(format!("add location {}", &opts.name))?;
 
@@ -228,7 +228,7 @@ fn _format_items(
     Ok(formatted_items.into_iter())
 }
 
-#[derive(Clap, Debug)]
+#[derive(Args, Debug)]
 struct ItemsOpts {
     #[clap(flatten)]
     common: CommonOpts,
@@ -258,7 +258,7 @@ fn run_items(opts: ItemsOpts) -> AHResult<()> {
     Ok(())
 }
 
-#[derive(Clap)]
+#[derive(Args)]
 struct DeleteOpts {
     #[clap(flatten)]
     common: CommonOpts,
@@ -319,7 +319,7 @@ fn run_locations(opts: CommonOpts) -> AHResult<()> {
     Ok(())
 }
 
-#[derive(Clap)]
+#[derive(Args)]
 struct QuickaddOpts {
     #[clap(flatten)]
     common: CommonOpts,

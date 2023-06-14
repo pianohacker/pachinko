@@ -403,7 +403,9 @@ impl App {
                         },
                         insert_char: Some(|item, _, c| {
                             match c.to_ascii_lowercase() {
-                                's' | 'm' | 'l' | 'x' => item.size = c.to_string(),
+                                's' | 'm' | 'l' | 'x' => {
+                                    item.size = c.to_ascii_uppercase().to_string()
+                                }
                                 _ => {}
                             };
 
