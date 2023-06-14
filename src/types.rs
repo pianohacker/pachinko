@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
 use qualia::{object, Object, ObjectShape, ObjectShapeWithId, Queryable, Store};
+use std::str::FromStr;
 
 use crate::AHResult;
 
@@ -93,7 +94,7 @@ pub struct ItemLocation {
     pub bin: Option<i64>,
 }
 
-impl std::str::FromStr for ItemLocation {
+impl FromStr for ItemLocation {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> AHResult<Self> {
         let parts: Vec<&str> = s.split("/").collect();
@@ -118,7 +119,7 @@ impl std::str::FromStr for ItemLocation {
     }
 }
 
-#[derive(Clap)]
+#[derive(Clap, Debug, PartialEq)]
 #[clap(rename_all = "screaming_snake")]
 pub enum ItemSize {
     S,
@@ -130,7 +131,7 @@ pub enum ItemSize {
 impl std::str::FromStr for ItemSize {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> AHResult<Self> {
-        match s {
+        match s.to_ascii_uppercase().as_ref() {
             "S" => Ok(ItemSize::S),
             "M" => Ok(ItemSize::M),
             "L" => Ok(ItemSize::L),
@@ -160,5 +161,16 @@ impl From<ItemSize> for i64 {
             ItemSize::L => 4,
             ItemSize::X => 6,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn item_size_parsing_should_succeed_for_lowercase_sizes() {
+        assert_eq!(ItemSize::from_str("s").unwrap(), ItemSize::S);
+        assert_eq!(ItemSize::from_str("m").unwrap(), ItemSize::M);
     }
 }
