@@ -231,13 +231,13 @@ pub struct Sheet<'a> {
     /// Optional header
     header: Option<Row<'a>>,
     /// Data to display in each row
-    rows: Vec<Row<'a>>,
+    rows: Vec<&'a Row<'a>>,
 }
 
 impl<'a> Sheet<'a> {
     pub fn new<T>(rows: T) -> Self
     where
-        T: IntoIterator<Item = Row<'a>>,
+        T: IntoIterator<Item = &'a Row<'a>>,
     {
         Self {
             block: None,

@@ -10,6 +10,7 @@ use std::{
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, ModifierKeyCode};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use indexmap::IndexMap;
+use lazy_static::lazy_static;
 use qualia::{CheckpointId, ObjectShapeWithId, Queryable, Store};
 use tui::{
     backend::Backend,
@@ -26,23 +27,269 @@ use crate::{types::ItemSize, AHResult};
 
 use super::sheet::{Row, Sheet, SheetSelection, SheetState};
 
-struct ItemColumnViewModel {
+struct ItemRenderEntry<C> {
+    item: Item,
+    contents: C,
+    column_widths: Vec<usize>,
+}
+
+struct ItemColumnRenderedSet<'columns, 'row> {
+    columns: &'columns Vec<ItemColumn>,
+    checkpoint: CheckpointId,
+    entries: IndexMap<i64, ItemRenderEntry<Row<'row>>>,
+    search: Option<String>,
+}
+
+impl<'columns, 'row> ItemColumnRenderedSet<'columns, 'row> {
+    fn new(columns: &'columns Vec<ItemColumn>) -> Self {
+        Self {
+            columns,
+            checkpoint: 0,
+            entries: IndexMap::new(),
+            search: None,
+        }
+    }
+
+    fn regenerate_if_needed(
+        &mut self,
+        last_fetched_items: &IndexMap<i64, Item>,
+        last_updated_checkpoint: CheckpointId,
+        search: Option<String>,
+    ) {
+        if search == self.search && last_updated_checkpoint == self.checkpoint {
+            return;
+        }
+
+        let non_empty_search = search
+            .as_ref()
+            .and_then(|s| if s.is_empty() { None } else { Some(s) });
+
+        let mut all_entries: IndexMap<i64, ItemRenderEntry<_>> = last_fetched_items
+            .iter()
+            .map(|(id, o)| {
+                let column_contents: Vec<_> = self
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .map(|(_, c)| (c.display)(o).unwrap_or("".into()))
+                    .collect();
+                let column_widths = column_contents
+                    .iter()
+                    .map(|text| text.graphemes(true).count())
+                    .collect::<Vec<_>>();
+
+                (
+                    *id,
+                    ItemRenderEntry {
+                        item: o.clone(),
+                        contents: column_contents,
+                        column_widths,
+                    },
+                )
+            })
+            .collect();
+
+        all_entries.sort_by(|_, a, _, b| {
+            (&a.item.location.name, a.item.bin_no, &a.item.name).cmp(&(
+                &b.item.location.name,
+                b.item.bin_no,
+                &b.item.name,
+            ))
+        });
+
+        let (mut filtered_entries, mut unused_entries): (IndexMap<_, _>, IndexMap<_, _>) =
+            if let Some(search) = non_empty_search {
+                let matcher = SkimMatcherV2::default();
+
+                let mut unused_entries = IndexMap::new();
+
+                let mut scored_result: Vec<_> = all_entries
+                    .into_iter()
+                    .filter_map(|(object_id, e)| {
+                        let column_results: Vec<_> = e
+                            .contents
+                            .iter()
+                            .enumerate()
+                            .map(|(i, c)| {
+                                if !self.columns[i].searchable {
+                                    return (c, 0, vec![]);
+                                }
+
+                                match matcher.fuzzy_indices(&c, search) {
+                                    None => (c, 0, vec![]),
+                                    Some((score, indices)) => (c, score, indices),
+                                }
+                            })
+                            .collect();
+
+                        let total_score: i64 =
+                            column_results.iter().map(|(_, score, _)| score).sum();
+
+                        if total_score == 0 {
+                            unused_entries.insert(object_id, e);
+                            return None;
+                        }
+
+                        Some((
+                            total_score,
+                            object_id,
+                            ItemRenderEntry {
+                                contents: Row::new(column_results.into_iter().map(
+                                    |(c, _, indices)| {
+                                        let mut spans: Vec<_> =
+                                            c.chars().map(|c| Span::raw(c.to_string())).collect();
+
+                                        for idx in &indices {
+                                            spans[*idx] = Span::styled(
+                                                spans[*idx].content.clone(),
+                                                Style::default().bg(Color::Indexed(58)),
+                                            );
+                                        }
+
+                                        Spans::from(spans)
+                                    },
+                                )),
+                                item: e.item,
+                                column_widths: e.column_widths,
+                            },
+                        ))
+                    })
+                    .collect();
+
+                scored_result.sort_by_key(|(score, _, _)| -score);
+
+                (
+                    scored_result
+                        .into_iter()
+                        .map(|(_, object_id, i)| (object_id, i))
+                        .collect(),
+                    unused_entries,
+                )
+            } else {
+                (
+                    all_entries
+                        .into_iter()
+                        .map(|(object_id, e)| {
+                            (
+                                object_id,
+                                ItemRenderEntry {
+                                    contents: Row::new(e.contents),
+                                    item: e.item,
+                                    column_widths: e.column_widths,
+                                },
+                            )
+                        })
+                        .collect(),
+                    IndexMap::new(),
+                )
+            };
+
+        let reordered_entries = if self.entries.is_empty() {
+            filtered_entries
+        } else {
+            // First, build the list of new items using the order of the old items.
+            // This brings in modifications (by pulling from the new set of items) and
+            // deletions (where item.remove()) will return None.
+            let mut reordered_entries: IndexMap<_, _> = self
+                .entries
+                .keys()
+                .filter_map(|id| {
+                    filtered_entries.remove(id).map(|e| (*id, e)).or_else(|| {
+                        if search == self.search {
+                            unused_entries.remove(id).map(|e| {
+                                (
+                                    *id,
+                                    ItemRenderEntry {
+                                        contents: Row::new(e.contents),
+                                        item: e.item,
+                                        column_widths: e.column_widths,
+                                    },
+                                )
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+
+            // All that remains in `filtered_entries` is new items.
+            for (object_id, entry) in filtered_entries.into_iter() {
+                let insert_pos = reordered_entries
+                    .values()
+                    .collect::<Vec<_>>()
+                    .binary_search_by(|e| {
+                        (&e.item.location.name, e.item.bin_no, &e.item.name).cmp(&(
+                            &entry.item.location.name,
+                            entry.item.bin_no,
+                            &entry.item.name,
+                        ))
+                    })
+                    .map_or_else(|e| e, |o| o);
+                reordered_entries.insert(object_id, entry);
+                reordered_entries.move_index(reordered_entries.len() - 1, insert_pos);
+            }
+
+            reordered_entries
+        };
+
+        self.checkpoint = last_updated_checkpoint;
+        self.entries = reordered_entries;
+        self.search = search;
+    }
+
+    fn max_column_width(&self, column: usize) -> usize {
+        std::iter::once(self.columns[column].header.len())
+            .chain(self.entries.iter().map(|(_, r)| r.column_widths[column]))
+            .max()
+            .unwrap()
+    }
+
+    fn add_entry(&mut self, after_index: usize, item: &Item) {
+        let column_contents: Vec<_> = self
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(_, c)| (c.display)(item).unwrap_or("".into()))
+            .collect();
+
+        let column_widths = column_contents
+            .iter()
+            .map(|text| text.graphemes(true).count())
+            .collect::<Vec<_>>();
+
+        let (inserted_index, _) = self.entries.insert_full(
+            item.get_object_id().unwrap(),
+            ItemRenderEntry {
+                item: item.clone(),
+                contents: Row::new(column_contents),
+                column_widths,
+            },
+        );
+        dbg!(inserted_index, after_index);
+        self.entries.move_index(inserted_index, after_index + 1);
+    }
+}
+
+struct ItemColumnViewModel<'columns, 'row> {
     store: Store,
-    items: IndexMap<i64, Item>,
-    columns: Vec<ItemColumn>,
+    last_fetched_items: IndexMap<i64, Item>,
+    columns: &'columns Vec<ItemColumn>,
     last_updated_checkpoint: CheckpointId,
-    last_rendered_row_info: IndexMap<i64, Vec<usize>>,
+    last_rendered_set: ItemColumnRenderedSet<'columns, 'row>,
+    search: Option<String>,
     edited_items: IndexMap<i64, Item>,
 }
 
-impl ItemColumnViewModel {
-    fn new(store: Store, columns: Vec<ItemColumn>) -> Self {
+impl<'columns, 'row> ItemColumnViewModel<'columns, 'row> {
+    fn new(store: Store, columns: &'columns Vec<ItemColumn>) -> Self {
         Self {
             store,
-            items: IndexMap::new(),
             columns,
+            last_fetched_items: IndexMap::new(),
+            search: None,
             last_updated_checkpoint: 0,
-            last_rendered_row_info: IndexMap::new(),
+            last_rendered_set: ItemColumnRenderedSet::new(&columns),
             edited_items: IndexMap::new(),
         }
     }
@@ -50,183 +297,57 @@ impl ItemColumnViewModel {
     fn refresh(&mut self) -> AHResult<()> {
         self.last_updated_checkpoint = self.store.last_checkpoint_id()?;
 
-        let mut items = self
+        self.last_fetched_items = self
             .store
             .query(Item::q())
             .iter_converted::<Item>(&self.store)?
             .map(|i| (i.get_object_id().unwrap(), i))
             .collect();
 
-        if self.items.is_empty() {
-            self.items = items;
-
-            self.reset_view_order();
-        } else {
-            // First, build the list of new items using the order of the old items.
-            // This brings in modifications (by pulling from the new set of items) and
-            // deletions (where item.remove()) will return None.
-            let mut reordered_items: IndexMap<_, _> = self
-                .items
-                .keys()
-                .filter_map(|id| items.remove(id).map(|item| (*id, item)))
-                .collect();
-
-            // All that remains in `items` is new items.
-            for (object_id, item) in items.into_iter() {
-                let insert_pos = self
-                    .items
-                    .values()
-                    .collect::<Vec<_>>()
-                    .binary_search_by(|i| {
-                        (&i.location.name, i.bin_no, &i.name).cmp(&(
-                            &item.location.name,
-                            item.bin_no,
-                            &item.name,
-                        ))
-                    })
-                    .map_or_else(|e| e, |o| o);
-                reordered_items.insert(object_id, item);
-                reordered_items.move_index(reordered_items.len() - 1, insert_pos);
-            }
-
-            self.items = reordered_items;
-        }
+        self.last_rendered_set.regenerate_if_needed(
+            &self.last_fetched_items,
+            self.last_updated_checkpoint,
+            self.search.clone(),
+        );
 
         Ok(())
     }
 
-    fn refresh_if_needed(&mut self) -> AHResult<()> {
+    fn refresh_if_needed(&mut self) -> AHResult<bool> {
         if self.store.modified_since(self.last_updated_checkpoint)? {
-            self.refresh()
+            self.refresh()?;
+            Ok(true)
         } else {
-            Ok(())
+            Ok(false)
         }
     }
 
     fn render(
         &mut self,
         search: &Option<String>,
-    ) -> AHResult<(Vec<String>, Vec<Constraint>, Vec<Row>)> {
+    ) -> AHResult<(Vec<String>, Vec<Constraint>, Vec<&Row>)> {
+        self.search = search.clone();
         self.refresh_if_needed()?;
 
-        let columns = &self.columns;
-        let rows: Vec<(i64, Vec<_>)> = self
-            .items
-            .iter()
-            .map(|(id, o)| {
-                (
-                    *id,
-                    columns
-                        .iter()
-                        .enumerate()
-                        .map(|(i, c)| (c.display)(o).unwrap_or("".into()))
-                        .collect(),
-                )
-            })
-            .collect();
-
-        let mut row_column_widths: IndexMap<_, _> = rows
-            .iter()
-            .map(|(object_id, row)| {
-                (
-                    *object_id,
-                    row.iter()
-                        .map(|text| text.graphemes(true).count())
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect();
-
-        let column_widths = columns
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                std::iter::once(c.header.len())
-                    .chain(row_column_widths.iter().map(|(_, r)| r[i]))
-                    .max()
-                    .unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        let non_empty_search = search
-            .as_ref()
-            .and_then(|s| if s.is_empty() { None } else { Some(s) });
-
-        let displayed_rows: IndexMap<_, _> = if let Some(search) = non_empty_search {
-            let matcher = SkimMatcherV2::default();
-
-            let mut scored_result: Vec<_> = rows
-                .into_iter()
-                .filter_map(|(object_id, row)| {
-                    let column_results: Vec<_> = row
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, c)| {
-                            if !columns[i].searchable {
-                                return (c, 0, vec![]);
-                            }
-
-                            match matcher.fuzzy_indices(&c, search) {
-                                None => (c, 0, vec![]),
-                                Some((score, indices)) => (c, score, indices),
-                            }
-                        })
-                        .collect();
-
-                    let total_score: i64 = column_results.iter().map(|(_, score, _)| score).sum();
-
-                    if total_score == 0 {
-                        return None;
-                    }
-
-                    Some((
-                        total_score,
-                        object_id,
-                        Row::new(column_results.into_iter().map(|(c, _, indices)| {
-                            let mut spans: Vec<_> =
-                                c.chars().map(|c| Span::raw(c.to_string())).collect();
-
-                            for idx in &indices {
-                                spans[*idx] = Span::styled(
-                                    spans[*idx].content.clone(),
-                                    Style::default().bg(Color::Indexed(58)),
-                                );
-                            }
-
-                            Spans::from(spans)
-                        })),
-                    ))
-                })
-                .collect();
-
-            scored_result.sort_by_key(|(score, _, _)| -score);
-
-            scored_result
-                .into_iter()
-                .map(|(_, object_id, i)| (object_id, i))
-                .collect()
-        } else {
-            rows.into_iter()
-                .map(|(object_id, r)| (object_id, Row::new(r)))
-                .collect()
-        };
-
-        self.last_rendered_row_info = displayed_rows
-            .keys()
-            .map(|id| (*id, row_column_widths.remove(id).unwrap()))
-            .collect();
-
         Ok((
-            columns.iter().map(|c| c.header.clone()).collect(),
-            columns
+            self.columns.iter().map(|c| c.header.clone()).collect(),
+            self.columns
                 .iter()
                 .enumerate()
                 .map(|(i, c)| match c.width {
-                    ItemColumnWidth::Shrink => Constraint::Length(column_widths[i] as u16),
-                    ItemColumnWidth::Expand => Constraint::Min(column_widths[i] as u16),
+                    ItemColumnWidth::Shrink => {
+                        Constraint::Length(self.last_rendered_set.max_column_width(i) as u16)
+                    }
+                    ItemColumnWidth::Expand => {
+                        Constraint::Min(self.last_rendered_set.max_column_width(i) as u16)
+                    }
                 })
                 .collect::<Vec<_>>(),
-            displayed_rows.into_values().collect(),
+            self.last_rendered_set
+                .entries
+                .values()
+                .map(|e| &e.contents)
+                .collect(),
         ))
     }
 
@@ -249,19 +370,18 @@ impl ItemColumnViewModel {
             return None;
         }
 
-        let (_, column_widths) = self.last_rendered_row_info.get_index(row_index).unwrap();
+        let (_, ItemRenderEntry { column_widths, .. }) =
+            self.last_rendered_set.entries.get_index(row_index).unwrap();
 
         Some(column_widths[column_index])
     }
 
-    fn reset_view_order(&mut self) {
-        self.items.sort_by(|_, a, _, b| {
-            (&a.location.name, a.bin_no, &a.name).cmp(&(&b.location.name, b.bin_no, &b.name))
-        });
-    }
-
-    fn insert_item(&mut self, after_index: usize) -> AHResult<()> {
-        let (after_object_id, _) = self.last_rendered_row_info.get_index(after_index).unwrap();
+    fn insert_item(&mut self, after_index: usize, search: &Option<String>) -> AHResult<()> {
+        let (after_object_id, _) = self
+            .last_rendered_set
+            .entries
+            .get_index(after_index)
+            .unwrap();
         let after_item: Item = self
             .store
             .query(Item::q().id(*after_object_id))
@@ -269,23 +389,46 @@ impl ItemColumnViewModel {
             .unwrap();
         let last_location = after_item.location.clone();
 
+        let item_name = if let Some(search) = search {
+            let (word_indices, words): (Vec<_>, Vec<_>) = search.split_word_bound_indices().unzip();
+            let mut item_name_parts = Vec::new();
+            item_name_parts.push(search[0..word_indices[0]].to_string());
+
+            for (i, word) in words.iter().enumerate() {
+                item_name_parts.push(word[0..1].to_ascii_uppercase().to_string());
+                item_name_parts.push(word[1..].to_string());
+
+                let next_word_start = if i == words.len() - 1 {
+                    search.len()
+                } else {
+                    word_indices[i + 1]
+                };
+
+                item_name_parts
+                    .push(search[word_indices[i] + word.len()..next_word_start].to_string());
+            }
+
+            item_name_parts.join("")
+        } else {
+            "".to_string()
+        };
+
         let item = add_item(
             &mut self.store,
-            "".to_string(),
+            item_name,
             &last_location,
             None,
             ItemSize::M,
         )?;
 
-        let (inserted_index, _) = self.items.insert_full(item.get_object_id().unwrap(), item);
-        self.items.move_index(inserted_index, after_index + 1);
+        self.last_rendered_set.add_entry(after_index, &item);
 
         Ok(())
     }
 
     fn delete_item(&mut self, row_index: usize) -> AHResult<String> {
-        let (object_id, _) = self.last_rendered_row_info.get_index(row_index).unwrap();
-        let item = self.items.get(object_id).unwrap();
+        let (object_id, ItemRenderEntry { item, .. }) =
+            self.last_rendered_set.entries.get_index(row_index).unwrap();
 
         let checkpoint = self.store.checkpoint()?;
         checkpoint.query(Item::q().id(*object_id)).delete()?;
@@ -300,8 +443,8 @@ impl ItemColumnViewModel {
             None => return i,
         };
 
-        let (object_id, _) = self.last_rendered_row_info.get_index(row).unwrap();
-        let item = self.items.get_mut(object_id).unwrap();
+        let (object_id, ItemRenderEntry { item, .. }) =
+            self.last_rendered_set.entries.get_index_mut(row).unwrap();
 
         self.edited_items
             .entry(*object_id)
@@ -316,8 +459,8 @@ impl ItemColumnViewModel {
             None => return,
         };
 
-        let (object_id, _) = self.last_rendered_row_info.get_index(row).unwrap();
-        let item = self.items.get_mut(object_id).unwrap();
+        let (object_id, ItemRenderEntry { item, .. }) =
+            self.last_rendered_set.entries.get_index_mut(row).unwrap();
 
         self.edited_items
             .entry(*object_id)
@@ -335,10 +478,13 @@ impl ItemColumnViewModel {
             let checkpoint = self.store.checkpoint().unwrap();
             checkpoint
                 .query(Item::q().id(*object_id))
-                .set(self.items[object_id].clone().into())
+                .set(self.last_fetched_items[object_id].clone().into())
                 .unwrap();
             checkpoint
-                .commit(format!("update item: {}", self.items[object_id].name))
+                .commit(format!(
+                    "update item: {}",
+                    self.last_fetched_items[object_id].name
+                ))
                 .unwrap();
         }
 
@@ -358,8 +504,8 @@ impl ItemColumnViewModel {
     }
 }
 
-pub struct App {
-    item_column_view_model: ItemColumnViewModel,
+pub struct App<'a, 'b> {
+    item_column_view_model: ItemColumnViewModel<'a, 'b>,
     running: Arc<AtomicBool>,
     search: Option<String>,
     search_in_progress: bool,
@@ -370,87 +516,86 @@ pub struct App {
     help_shown: bool,
 }
 
-impl App {
+lazy_static! {
+    static ref ITEM_COLUMNS: Vec<ItemColumn> = vec![
+        ItemColumn {
+            header: "Location".to_string(),
+            width: ItemColumnWidth::Shrink,
+            kind: ItemColumnKind::Choice,
+            display: |i| Ok(i.format().format_location()),
+            insert_char: None,
+            delete_char: None,
+            searchable: true,
+        },
+        ItemColumn {
+            header: "Size".to_string(),
+            width: ItemColumnWidth::Shrink,
+            kind: ItemColumnKind::Choice,
+            display: |i: &Item| {
+                Ok(match i.size.parse()? {
+                    ItemSize::S => "Sm",
+                    ItemSize::M => "Md",
+                    ItemSize::L => "Lg",
+                    ItemSize::X => "XL",
+                }
+                .to_string())
+            },
+            insert_char: Some(|item, _, c| {
+                match c.to_ascii_lowercase() {
+                    's' | 'm' | 'l' | 'x' => item.size = c.to_ascii_uppercase().to_string(),
+                    _ => {}
+                };
+
+                0
+            }),
+            delete_char: None,
+            searchable: false,
+        },
+        ItemColumn {
+            header: "Name".to_string(),
+            width: ItemColumnWidth::Expand,
+            kind: ItemColumnKind::FullText,
+            display: |i| Ok(i.name.clone()),
+            insert_char: Some(|item, i, c| {
+                item.name.insert(
+                    item.name
+                        .grapheme_indices(true)
+                        .nth(i)
+                        .map_or(item.name.len(), |(offset, _)| offset),
+                    c,
+                );
+
+                item.name
+                    .grapheme_indices(true)
+                    .nth(i + 1)
+                    .map_or(item.name.len(), |(offset, _)| offset)
+            }),
+            delete_char: Some(|item, i| {
+                let (from, to) = {
+                    let mut grapheme_indices = item.name.grapheme_indices(true).skip(i);
+
+                    let from = match grapheme_indices.next() {
+                        Some((i, _)) => i,
+                        None => return,
+                    };
+
+                    (from, grapheme_indices.next().map(|(i, _)| i))
+                };
+
+                item.name.drain(from..to.unwrap_or(item.name.len()));
+            }),
+            searchable: true,
+        },
+    ];
+}
+
+impl<'a, 'b> App<'a, 'b> {
     pub fn new(store: Store, running: Arc<AtomicBool>) -> Self {
         let mut sheet_state = SheetState::default();
         sheet_state.select(SheetSelection::Char(0, 2, 0));
 
         Self {
-            item_column_view_model: ItemColumnViewModel::new(
-                store,
-                vec![
-                    ItemColumn {
-                        header: "Location".to_string(),
-                        width: ItemColumnWidth::Shrink,
-                        kind: ItemColumnKind::Choice,
-                        display: |i| Ok(i.format().format_location()),
-                        insert_char: None,
-                        delete_char: None,
-                        searchable: true,
-                    },
-                    ItemColumn {
-                        header: "Size".to_string(),
-                        width: ItemColumnWidth::Shrink,
-                        kind: ItemColumnKind::Choice,
-                        display: |i: &Item| {
-                            Ok(match i.size.parse()? {
-                                ItemSize::S => "Sm",
-                                ItemSize::M => "Md",
-                                ItemSize::L => "Lg",
-                                ItemSize::X => "XL",
-                            }
-                            .to_string())
-                        },
-                        insert_char: Some(|item, _, c| {
-                            match c.to_ascii_lowercase() {
-                                's' | 'm' | 'l' | 'x' => {
-                                    item.size = c.to_ascii_uppercase().to_string()
-                                }
-                                _ => {}
-                            };
-
-                            0
-                        }),
-                        delete_char: None,
-                        searchable: false,
-                    },
-                    ItemColumn {
-                        header: "Name".to_string(),
-                        width: ItemColumnWidth::Expand,
-                        kind: ItemColumnKind::FullText,
-                        display: |i| Ok(i.name.clone()),
-                        insert_char: Some(|item, i, c| {
-                            item.name.insert(
-                                item.name
-                                    .grapheme_indices(true)
-                                    .nth(i)
-                                    .map_or(item.name.len(), |(offset, _)| offset),
-                                c,
-                            );
-
-                            item.name
-                                .grapheme_indices(true)
-                                .nth(i + 1)
-                                .map_or(item.name.len(), |(offset, _)| offset)
-                        }),
-                        delete_char: Some(|item, i| {
-                            let (from, to) = {
-                                let mut grapheme_indices = item.name.grapheme_indices(true).skip(i);
-
-                                let from = match grapheme_indices.next() {
-                                    Some((i, _)) => i,
-                                    None => return,
-                                };
-
-                                (from, grapheme_indices.next().map(|(i, _)| i))
-                            };
-
-                            item.name.drain(from..to.unwrap_or(item.name.len()));
-                        }),
-                        searchable: true,
-                    },
-                ],
-            ),
+            item_column_view_model: ItemColumnViewModel::new(store, &*ITEM_COLUMNS),
             running,
             search: None,
             search_in_progress: false,
@@ -560,7 +705,7 @@ impl App {
 
             f.render_widget(Clear, help_size);
 
-            let help_rows = &[
+            let help_rows: Vec<_> = [
                 &["F1", "Show/hide this help screen"],
                 &["F5", "Refresh the list of items"],
                 &["F12", "Quit"],
@@ -570,14 +715,12 @@ impl App {
                 &["Alt+Backspace", "Undo the last change"],
                 &["Alt+Delete", "Delete the current item"],
                 &["Alt+Enter", "Create a new item"],
-            ];
+            ]
+            .iter()
+            .map(|r| Row::new(r.into_iter().map(|c| c.to_string()).collect::<Vec<_>>()))
+            .collect();
             f.render_widget(
-                Sheet::new(
-                    help_rows.into_iter().map(|r| {
-                        Row::new(r.into_iter().map(|c| c.to_string()).collect::<Vec<_>>())
-                    }),
-                )
-                .widths(&[Constraint::Length(16), Constraint::Min(0)]),
+                Sheet::new(help_rows.iter()).widths(&[Constraint::Length(16), Constraint::Min(0)]),
                 help_size.inner(&Margin {
                     horizontal: 1,
                     vertical: 0,
@@ -691,7 +834,10 @@ impl App {
                         }
                         KeyCode::Enter if e.modifiers == KeyModifiers::ALT => {
                             self.item_column_view_model
-                                .insert_item(self.sheet_state.selection().row().unwrap_or(0))
+                                .insert_item(
+                                    self.sheet_state.selection().row().unwrap_or(0),
+                                    &self.search,
+                                )
                                 .unwrap();
 
                             self.sheet_state
@@ -868,7 +1014,6 @@ impl App {
 
     fn reset_selection(&mut self) {
         self.sheet_state.select(SheetSelection::Char(0, 2, 0));
-        self.item_column_view_model.reset_view_order();
     }
 
     fn back_out(&mut self) {

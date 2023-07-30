@@ -958,8 +958,6 @@ dependencies = [
 [[package]]
 name = "qualia"
 version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5333f47e92041b7885194d3ec5c76ffc3715209faf46473d71da7c3f58b0d859"
 dependencies = [
  "qualia_derive",
  "regex",
@@ -971,9 +969,7 @@ dependencies = [
 
 [[package]]
 name = "qualia_derive"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28ab374584c2da875961e2b21ef9a1b49b125872ad2d4e2f06569ee013be13b8"
+version = "0.15.1"
 dependencies = [
  "convert_case",
  "proc-macro2",
