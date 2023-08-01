@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use crate::AHResult;
 
-#[derive(Clone, Debug, ObjectShape)]
+#[derive(Clone, Debug, Eq, PartialEq, ObjectShape)]
 #[fixed_fields("type" => "location")]
 pub struct Location {
     pub object_id: Option<i64>,
@@ -13,7 +13,7 @@ pub struct Location {
     pub num_bins: i64,
 }
 
-#[derive(Clone, Debug, ObjectShape)]
+#[derive(Clone, Debug, ObjectShape, PartialEq, Eq)]
 #[fixed_fields("type" => "item")]
 pub struct Item {
     pub object_id: Option<i64>,
@@ -42,7 +42,7 @@ impl Item {
         }
     }
 
-    pub fn format_with_store(&self, store: &Store) -> AHResult<FormattedItem> {
+    pub fn format_with_store(&self, _store: &Store) -> AHResult<FormattedItem> {
         Ok(self.format())
     }
 }

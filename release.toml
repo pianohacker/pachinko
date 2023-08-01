@@ -1,2 +1,2 @@
-no-dev-version = true
 pre-release-hook = ["cargo", "test", "--quiet"]
+consolidate-commits = true

@@ -1,5 +1,5 @@
 use anyhow::bail;
-use qualia::{object, Object, Store, Q};
+use qualia::{Object, Store, Q};
 use std::collections::HashMap;
 
 use crate::types::{Item, ItemSize, Location};
