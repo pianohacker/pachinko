@@ -3,7 +3,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::{Instant},
     vec,
 };
 
@@ -238,6 +238,8 @@ impl<'a, 'b> App<'a, 'b> {
                 &["Alt+Backspace", "Undo the last change"],
                 &["Alt+Delete", "Delete the current item"],
                 &["Alt+Enter", "Create a new item"],
+                &["Alt+S", "Save any changes to the current item"],
+                &["Alt+Shift+S", "Save all changed items"],
             ]
             .iter()
             .map(|r| Row::new(r.into_iter().map(|c| c.to_string()).collect::<Vec<_>>()))
@@ -257,12 +259,6 @@ impl<'a, 'b> App<'a, 'b> {
     }
 
     fn check_idle(&mut self) -> bool {
-        if Instant::now() - self.last_action_time > Duration::from_millis(1000) {
-            if self.item_column_view_model.persist_pending_edits() {
-                return true;
-            }
-        }
-
         false
     }
 
@@ -354,6 +350,34 @@ impl<'a, 'b> App<'a, 'b> {
                                     self.item_column_view_model.delete_item(row).unwrap();
                                 self.action_description =
                                     Some((Instant::now(), format!("deleted: {}", item_name)));
+                            }
+                        }
+                        KeyCode::Delete if e.modifiers == KeyModifiers::ALT => {
+                            if let Some(row) = self.sheet_state.selection().row() {
+                                let item_name =
+                                    self.item_column_view_model.delete_item(row).unwrap();
+                                self.action_description =
+                                    Some((Instant::now(), format!("deleted: {}", item_name)));
+                            }
+                        }
+                        KeyCode::Char('s')
+                            if e.modifiers == KeyModifiers::ALT | KeyModifiers::SHIFT =>
+                        {
+                            let count =
+                                self.item_column_view_model.persist_pending_edits().unwrap();
+                            self.action_description =
+                                Some((Instant::now(), format!("saved {} changes", count)));
+                        }
+                        KeyCode::Char('s') if e.modifiers == KeyModifiers::ALT => {
+                            if let Some(row) = self.sheet_state.selection().row() {
+                                if let Some(item_name) = self
+                                    .item_column_view_model
+                                    .persist_current_pending_edit(row)
+                                    .unwrap()
+                                {
+                                    self.action_description =
+                                        Some((Instant::now(), format!("saved: {}", item_name)));
+                                }
                             }
                         }
                         KeyCode::Up => {

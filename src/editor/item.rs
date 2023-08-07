@@ -1,4 +1,7 @@
-use std::{collections::HashSet, vec};
+use std::{
+    collections::{HashSet},
+    vec,
+};
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use indexmap::IndexMap;
@@ -38,12 +41,16 @@ pub struct ItemColumn {
     pub searchable: bool,
 }
 
-fn render_item(columns: &Vec<ItemColumn>, item: &Item) -> Vec<String> {
+fn render_item_columns(columns: &Vec<ItemColumn>, item: &Item) -> (Vec<String>, Vec<usize>) {
     columns
         .iter()
         .enumerate()
-        .map(|(_, c)| (c.display)(item).unwrap_or("".into()))
-        .collect()
+        .map(|(_, c)| {
+            let content = (c.display)(item).unwrap_or("".into());
+            let width = content.graphemes(true).count();
+            (content, width)
+        })
+        .unzip()
 }
 
 fn item_name_from_search(search: &Option<String>) -> String {
@@ -134,11 +141,7 @@ impl<'columns, 'row> ItemColumnRenderedSet<'columns, 'row> {
         let mut all_entries: IndexMap<i64, ItemRenderEntry<_>> = last_fetched_items
             .iter()
             .map(|(id, item)| {
-                let column_contents = render_item(self.columns, item);
-                let column_widths = column_contents
-                    .iter()
-                    .map(|text| text.graphemes(true).count())
-                    .collect::<Vec<_>>();
+                let (column_contents, column_widths) = render_item_columns(self.columns, item);
 
                 (
                     *id,
@@ -296,12 +299,7 @@ impl<'columns, 'row> ItemColumnRenderedSet<'columns, 'row> {
     }
 
     fn add_item(&mut self, after_index: usize, item: &Item) {
-        let column_contents: Vec<_> = render_item(self.columns, item);
-
-        let column_widths = column_contents
-            .iter()
-            .map(|text| text.graphemes(true).count())
-            .collect::<Vec<_>>();
+        let (column_contents, column_widths) = render_item_columns(self.columns, item);
 
         let (inserted_index, _) = self.entries.insert_full(
             item.get_object_id().unwrap(),
@@ -319,7 +317,9 @@ impl<'columns, 'row> ItemColumnRenderedSet<'columns, 'row> {
         let (object_id, entry) = self.entries.get_index_mut(index).unwrap();
 
         let value = editor(&mut entry.item);
-        entry.contents = Row::new(render_item(self.columns, &entry.item));
+        let (column_contents, column_widths) = render_item_columns(self.columns, &entry.item);
+        entry.column_widths = column_widths;
+        entry.contents = Row::new(column_contents);
 
         (*object_id, value)
     }
@@ -493,31 +493,51 @@ impl<'columns, 'row> ItemColumnViewModel<'columns, 'row> {
         self.edited_items.insert(object_id);
     }
 
-    pub fn persist_pending_edits(&mut self) -> bool {
+    pub fn persist_pending_edits(&mut self) -> AHResult<usize> {
         if self.edited_items.len() == 0 {
-            return false;
+            return Ok(0);
         }
 
         for object_id in self.edited_items.iter() {
             let edited_item = self.last_rendered_set.entries[object_id].item.clone();
             let edited_item_name = edited_item.name.clone();
-            let checkpoint = self.store.checkpoint().unwrap();
+            let checkpoint = self.store.checkpoint()?;
             checkpoint
                 .query(Item::q().id(*object_id))
-                .set(edited_item.into())
-                .unwrap();
-            checkpoint
-                .commit(format!("update item: {}", edited_item_name))
-                .unwrap();
+                .set(edited_item.into())?;
+            checkpoint.commit(format!("update item: {}", edited_item_name))?;
         }
 
+        let updated = self.edited_items.len();
         self.edited_items.clear();
 
-        true
+        Ok(updated)
+    }
+
+    pub fn persist_current_pending_edit(&mut self, row: usize) -> AHResult<Option<String>> {
+        if self.edited_items.len() == 0 {
+            return Ok(None);
+        }
+
+        let (object_id, entry) = self.last_rendered_set.entries.get_index(row).unwrap();
+
+        if let Some(_) = self.edited_items.take(object_id) {
+            let edited_item = entry.item.clone();
+            let edited_item_name = edited_item.name.clone();
+            let checkpoint = self.store.checkpoint()?;
+            checkpoint
+                .query(Item::q().id(*object_id))
+                .set(edited_item.into())?;
+            checkpoint.commit(format!("update item: {}", edited_item_name))?;
+
+            Ok(Some(edited_item_name))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn undo(&mut self) -> AHResult<Option<String>> {
-        self.persist_pending_edits();
+        self.persist_pending_edits()?;
 
         let description = self.store.undo()?;
 
