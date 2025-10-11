@@ -16,7 +16,8 @@ use clap::{Args, Parser, Subcommand};
 use git_version::git_version;
 use qualia::object;
 use qualia::{Object, Store, Q};
-use rustyline::Editor;
+use rustyline::history::MemHistory;
+use rustyline::{Config, Editor};
 
 use crate::console::run_console;
 use crate::editor::run_editor;
@@ -340,7 +341,7 @@ fn run_quickadd(opts: QuickaddOpts) -> AHResult<()> {
     };
     let prompt = location.name.clone() + &bin_number_display + "> ";
 
-    let mut rl = Editor::<()>::new()?;
+    let mut rl = Editor::<(), MemHistory>::with_history(Config::default(), MemHistory::new())?;
 
     while let Ok(line) = rl.readline(&prompt) {
         let mut name = line.trim().to_string();

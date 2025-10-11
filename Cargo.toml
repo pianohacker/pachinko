@@ -11,32 +11,32 @@ license = "MPL-2.0"
 [dependencies]
 qualia = "0.15"
 anyhow = "1.0" # Flexible concrete Error type built on std::error::Error
-clap = { version = "4.2.1", features = ["derive", "env"] }
-dirs = "1.0"
-rustyline = "10.0.0"
-regex = "1.4" # An implementation of regular expressions for Rust. This implementation uses finite automata and gua…
+clap = { version = "4.5.48", features = ["derive", "env"] }
+dirs = "6.0"
+rustyline = "17.0.2"
+regex = "1.12" # An implementation of regular expressions for Rust. This implementation uses finite automata and gua…
 serde = "1.0" # A generic serialization/deserialization framework
 serde_json = "1.0" # A JSON serialization file format
-shell-words = "1.0" # Process command line according to parsing rules of UNIX shell
-tui = "0.17.0"
+shell-words = "1.1" # Process command line according to parsing rules of UNIX shell
+tui = "0.19.0"
 # crossterm = { path = "../crossterm" }
-crossterm = "0.26.1"
+crossterm = "0.29.0"
 # We do _not_ want the "termination" feature of ctrlc. Crossterm's polling works badly with it.
 # ctrlc = { version = "3.2.1", features = ["termination"] }
-ctrlc = "3.2.1"
-unicode-width = "0.1.9"
+ctrlc = "3.5.0"
+unicode-width = "0.2.2"
 fuzzy-matcher = "0.3.7"
-indexmap = "1.9.2"
-unicode-segmentation = "1.10.1"
-git-version = "0.3.5"
-nix = "0.26.2"
-lazy_static = "1.4.0"
+indexmap = "2.11.4"
+unicode-segmentation = "1.12.0"
+git-version = "0.3.9"
+nix = "0.30.1"
+lazy_static = "1.5.0"
 
 [dev-dependencies]
-assert_cmd = "1.0" # Test CLI Applications.
-predicates = "1.0"
-rexpect = "0.4"
-tempfile = "3.1" # A library for managing a temporary directory and deleting all contents when it's dropped.
+assert_cmd = "2.0" # Test CLI Applications.
+predicates = "3.1"
+rexpect = "0.6"
+tempfile = "3.23" # A library for managing a temporary directory and deleting all contents when it's dropped.
 
 [workspace]
 members = ["."]

@@ -1,11 +1,14 @@
+#![allow(dead_code, unused_macros)]
+
 use predicates::prelude::*;
 pub use tempfile::{Builder, TempDir};
+
+pub type RexpectResult = Result<(), rexpect::error::Error>;
 
 pub struct TestContext {
     pub temp_dir: TempDir,
 }
 
-#[allow(dead_code)]
 impl TestContext {
     pub fn pch_cmd(&self, arguments: &[&str]) -> std::process::Command {
         let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin("pachinko"));
@@ -74,7 +77,6 @@ impl CommandAssertHelpers for assert_cmd::assert::Assert {
     }
 }
 
-#[allow(unused_macros)]
 macro_rules! init {
     ($ctx:ident) => {
         let temp_dir = Builder::new().prefix("pachinko-cli").tempdir().unwrap();

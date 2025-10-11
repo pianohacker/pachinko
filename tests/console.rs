@@ -5,7 +5,7 @@ use common::*;
 use rexpect::session::spawn_command;
 
 #[test]
-fn console_has_help() -> rexpect::errors::Result<()> {
+fn console_has_help() -> RexpectResult {
     init!(ctx);
     ctx.populate();
 
@@ -26,7 +26,7 @@ fn console_has_help() -> rexpect::errors::Result<()> {
 }
 
 #[test]
-fn console_can_add_items() -> rexpect::errors::Result<()> {
+fn console_can_add_items() -> RexpectResult {
     init!(ctx);
     ctx.populate();
 
@@ -47,7 +47,7 @@ fn console_can_add_items() -> rexpect::errors::Result<()> {
 }
 
 #[test]
-fn console_can_add_items_with_spaces() -> rexpect::errors::Result<()> {
+fn console_can_add_items_with_spaces() -> RexpectResult {
     init!(ctx);
     ctx.populate();
 
@@ -68,7 +68,7 @@ fn console_can_add_items_with_spaces() -> rexpect::errors::Result<()> {
 }
 
 #[test]
-fn console_continues_after_bad_commands() -> rexpect::errors::Result<()> {
+fn console_continues_after_bad_commands() -> RexpectResult {
     init!(ctx);
     ctx.populate();
 
@@ -97,7 +97,7 @@ fn console_continues_after_bad_commands() -> rexpect::errors::Result<()> {
 }
 
 #[test]
-fn console_does_not_crash_with_empty_input() -> rexpect::errors::Result<()> {
+fn console_does_not_crash_with_empty_input() -> RexpectResult {
     init!(ctx);
     ctx.populate();
 

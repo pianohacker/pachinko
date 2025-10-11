@@ -5,7 +5,7 @@ use common::*;
 use rexpect::session::spawn_command;
 
 #[test]
-fn quick_addition_into_random_bins() -> rexpect::errors::Result<()> {
+fn quick_addition_into_random_bins() -> RexpectResult {
     init!(ctx);
     ctx.populate();
 
@@ -28,7 +28,7 @@ fn quick_addition_into_random_bins() -> rexpect::errors::Result<()> {
 }
 
 #[test]
-fn quick_addition_into_specified_bin() -> rexpect::errors::Result<()> {
+fn quick_addition_into_specified_bin() -> RexpectResult {
     init!(ctx);
     ctx.populate();
 

@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashSet},
-    vec,
-};
+use std::{collections::HashSet, vec};
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use indexmap::IndexMap;
@@ -253,22 +250,25 @@ impl<'columns, 'row> ItemColumnRenderedSet<'columns, 'row> {
                 .entries
                 .keys()
                 .filter_map(|id| {
-                    filtered_entries.remove(id).map(|e| (*id, e)).or_else(|| {
-                        if search == self.search {
-                            unused_entries.remove(id).map(|e| {
-                                (
-                                    *id,
-                                    ItemRenderEntry {
-                                        contents: Row::new(e.contents),
-                                        item: e.item,
-                                        column_widths: e.column_widths,
-                                    },
-                                )
-                            })
-                        } else {
-                            None
-                        }
-                    })
+                    filtered_entries
+                        .shift_remove(id)
+                        .map(|e| (*id, e))
+                        .or_else(|| {
+                            if search == self.search {
+                                unused_entries.shift_remove(id).map(|e| {
+                                    (
+                                        *id,
+                                        ItemRenderEntry {
+                                            contents: Row::new(e.contents),
+                                            item: e.item,
+                                            column_widths: e.column_widths,
+                                        },
+                                    )
+                                })
+                            } else {
+                                None
+                            }
+                        })
                 })
                 .collect();
 
@@ -371,7 +371,7 @@ impl<'columns, 'row> ItemColumnViewModel<'columns, 'row> {
     pub fn render(
         &mut self,
         search: &Option<String>,
-    ) -> AHResult<(Vec<String>, Vec<Constraint>, Vec<&Row>)> {
+    ) -> AHResult<(Vec<String>, Vec<Constraint>, Vec<&Row<'_>>)> {
         self.refresh_if_needed()?;
         self.last_rendered_set.regenerate_if_needed(
             &self.last_fetched_items,

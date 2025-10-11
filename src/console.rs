@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use qualia::{Store, Q};
 use regex::Regex;
-use rustyline::Editor;
+use rustyline::{history::MemHistory, Config, Editor};
 use shell_words;
 use std::borrow::Cow;
 
@@ -248,7 +248,8 @@ impl rustyline::validate::Validator for ConsoleHelper<'_> {}
 pub(crate) fn run_console(opts: CommonOpts) -> AHResult<()> {
     let store = opts.open_store().unwrap();
 
-    let mut rl = Editor::<ConsoleHelper>::new()?;
+    let mut rl =
+        Editor::<ConsoleHelper, MemHistory>::with_history(Config::default(), MemHistory::new())?;
     rl.set_helper(Some(ConsoleHelper { store: &store }));
 
     while let Ok(line) = rl.readline("pachinko> ") {
@@ -464,7 +465,7 @@ mod tests {
 
     fn open_test_store() -> (TempDir, Store) {
         let temp_dir = Builder::new().prefix("pachinko-cli").tempdir().unwrap();
-        let store_path = temp_dir.path().clone().join("pachinko-test-store.qualia");
+        let store_path = temp_dir.path().join("pachinko-test-store.qualia");
 
         (temp_dir, Store::open(store_path).unwrap())
     }
@@ -613,7 +614,7 @@ mod tests {
         helper.hint(
             input.as_ref(),
             pos,
-            &rustyline::Context::new(&rustyline::history::History::new()),
+            &rustyline::Context::new(&MemHistory::new()),
         )
     }
 
