@@ -6,6 +6,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod api;
 mod console;
 mod editor;
 mod types;
@@ -19,8 +20,6 @@ use qualia::{Object, Store, Q};
 use rustyline::history::MemHistory;
 use rustyline::{Config, Editor};
 
-use crate::console::run_console;
-use crate::editor::run_editor;
 use crate::types::{bin_number_value_parser, Item, ItemLocation, ItemSize, Location};
 use crate::utils::add_item;
 
@@ -46,6 +45,9 @@ enum SubCmd {
 
     #[clap(version = PACHINKO_VERSION, about = "Add a location")]
     AddLocation(AddLocationOpts),
+
+    #[clap(version = PACHINKO_VERSION, about = "Run the HTTP API")]
+    Api(api::ApiOpts),
 
     #[clap(version = PACHINKO_VERSION, about = "Run several commands from an interactive console", visible_alias = "c")]
     Console(CommonOpts),
@@ -77,10 +79,11 @@ impl SubCmd {
         match self {
             SubCmd::Add(o) => run_add(o),
             SubCmd::AddLocation(o) => run_add_location(o),
+            SubCmd::Api(o) => api::run_api(o),
             SubCmd::Delete(o) => run_delete(o),
             SubCmd::Dump(o) => run_dump(o),
-            SubCmd::Console(o) => run_console(o),
-            SubCmd::Editor(o) => run_editor(o),
+            SubCmd::Console(o) => console::run_console(o),
+            SubCmd::Editor(o) => editor::run_editor(o),
             SubCmd::Items(o) => run_items(o),
             SubCmd::Locations(o) => run_locations(o),
             SubCmd::Quickadd(o) => run_quickadd(o),
@@ -89,7 +92,7 @@ impl SubCmd {
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Clone, Debug)]
 struct CommonOpts {
     #[clap(long, env = "PACHINKO_STORE_PATH")]
     store_path: Option<String>,

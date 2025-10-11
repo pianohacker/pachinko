@@ -1,11 +1,12 @@
 use anyhow::{anyhow, bail, Context};
 use clap::ValueEnum;
 use qualia::{object, Object, ObjectShape, ObjectShapeWithId, Queryable, Store};
+use serde::Serialize;
 use std::str::FromStr;
 
 use crate::AHResult;
 
-#[derive(Clone, Debug, Eq, PartialEq, ObjectShape)]
+#[derive(Clone, Debug, Eq, PartialEq, ObjectShape, Serialize)]
 #[fixed_fields("type" => "location")]
 pub struct Location {
     pub object_id: Option<i64>,
@@ -13,7 +14,7 @@ pub struct Location {
     pub num_bins: i64,
 }
 
-#[derive(Clone, Debug, ObjectShape, PartialEq, Eq)]
+#[derive(Clone, Debug, ObjectShape, PartialEq, Eq, Serialize)]
 #[fixed_fields("type" => "item")]
 pub struct Item {
     pub object_id: Option<i64>,

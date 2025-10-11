@@ -272,6 +272,7 @@ pub(crate) fn run_console(opts: CommonOpts) -> AHResult<()> {
 
             match console_opts.subcmd {
                 ConsoleSubCommand::Quit => Ok(false),
+                ConsoleSubCommand::Base(SubCmd::Api(_)) => Ok(true),
                 ConsoleSubCommand::Base(SubCmd::Console(_)) => Ok(true),
                 ConsoleSubCommand::Base(sc) => sc.invoke().map(|_| true),
             }
@@ -480,6 +481,7 @@ mod tests {
             vec![
                 "add".to_string(),
                 "add-location".to_string(),
+                "api".to_string(),
                 "console".to_string(),
                 "delete".to_string(),
                 "dump".to_string(),
