@@ -1,0 +1,31 @@
+.listContainer {
+  flex: 1 0 0px;
+  overflow: auto;
+}
+
+.list {
+  display: grid;
+  column-gap: .25em;
+  row-gap: .5em;
+  grid-template-columns: max-content max-content minmax(2em, max-content) 1fr;
+}
+
+.itemLocation {
+  font-weight: 600;
+  font-size: 1.5rem;
+  text-align: right;
+}
+
+.itemSlash {
+  font-size: 1.5rem;
+}
+
+.itemBinNo {
+  font-weight: 600;
+  font-size: 1.5rem;
+  padding-right: 1rem;
+}
+
+.itemName {
+  font-size: 1.5rem;
+}

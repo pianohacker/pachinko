@@ -1,5 +1,9 @@
 use actix_rt;
-use actix_web::{get, http::StatusCode, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{
+    get,
+    http::{self, StatusCode},
+    web, App, HttpResponse, HttpServer, Responder,
+};
 use clap::Args;
 use qualia::Queryable;
 use serde::Deserialize;
@@ -78,7 +82,15 @@ pub fn run_api(opts: ApiOpts) -> crate::AHResult<()> {
         env_logger::init();
 
         HttpServer::new(move || {
+            let cors = actix_cors::Cors::default()
+                .allowed_origin("http://localhost:5173")
+                .allowed_methods(vec!["GET", "POST"])
+                .allowed_headers(vec![http::header::AUTHORIZATION, http::header::ACCEPT])
+                .allowed_header(http::header::CONTENT_TYPE)
+                .max_age(3600);
+
             App::new()
+                .wrap(cors)
                 .app_data(web::Data::new(opts.clone()))
                 .service(get_items)
         })
