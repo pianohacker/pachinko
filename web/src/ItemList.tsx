@@ -11,7 +11,6 @@ const itemsCache = new LRUCache<string, Item[]>({
   ttl: 1000 * 15,
 
   async fetchMethod(search, _staleValue, { signal }) {
-    await new Promise((r) => setTimeout(r, 500));
     return fetchApi("/items?" + new URLSearchParams({ q: search }), {
       signal,
     }).then((r) => r.json()) as Promise<Item[]>;
