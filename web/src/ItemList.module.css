@@ -7,7 +7,7 @@
   display: grid;
   column-gap: .25em;
   row-gap: .5em;
-  grid-template-columns: max-content max-content minmax(2em, max-content) 1fr;
+  grid-template-columns: 12em .5em minmax(2.5em, max-content) 1fr;
 }
 
 .itemLocation {
@@ -23,7 +23,6 @@
 .itemBinNo {
   font-weight: 600;
   font-size: 1.5rem;
-  padding-right: 1rem;
 }
 
 .itemName {
