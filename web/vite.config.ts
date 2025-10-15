@@ -13,4 +13,13 @@ export default defineConfig({
   css: {
     modules: {},
   },
+  server: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:7224",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ""),
+      },
+    },
+  },
 });
