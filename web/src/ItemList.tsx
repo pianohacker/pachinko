@@ -4,10 +4,7 @@ import type { Item } from "./types";
 
 import itemClasses from "./ItemList.module.css";
 import React from "react";
-import { AsyncFzf, Fzf, type FzfResultItem } from "fzf";
-
-let avg = 0;
-let n = 0;
+import { AsyncFzf, type FzfResultItem } from "fzf";
 
 const Highlightable = ({
   start,
