@@ -11,5 +11,5 @@ export type Item = {
   name: string;
   location: Location;
   bin_no: number;
-  size: String;
+  size: string;
 };
