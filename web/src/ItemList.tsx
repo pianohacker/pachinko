@@ -4,55 +4,39 @@ import type { Item } from "./types";
 
 import itemClasses from "./ItemList.module.css";
 import React from "react";
-import { AsyncFzf, type FzfResultItem } from "fzf";
+import fuzzysort from "fuzzysort";
+
+type SearchResult = {
+  item: Item;
+  columns: string[];
+  score: number;
+};
+
+const compareResults = (a: SearchResult, b: SearchResult): number =>
+  Math.round(b.score * 20) / 20 - Math.round(a.score * 20) / 20 ||
+  a.item.location.name.localeCompare(b.item.location.name) ||
+  a.item.bin_no - b.item.bin_no ||
+  a.item.name.localeCompare(b.item.name);
 
 const Highlightable = ({
-  start,
+  result,
+  column,
   className,
-  positions,
-  children,
 }: {
-  start: number;
+  result: SearchResult;
+  column: number;
   className: string;
-  positions: Set<number>;
-  children: string;
 }) => {
-  if (positions.size == 0) return <div className={className}>{children}</div>;
-
   return (
     <div
-      className={className}
+      className={
+        className + (result.score < 0.4 ? ` ${itemClasses.lowScore}` : "")
+      }
       dangerouslySetInnerHTML={{
-        __html: Array.from(children)
-          .map((c, i) => (positions.has(start + i) ? `<b>${c}</b>` : c))
-          .join(""),
+        __html: result.columns[column],
       }}
     />
   );
-
-  // This algorithm is more clever but less performant overall. Turns out the browser is actually
-  // pretty fast at rendering a bajillion one-character nodes.
-  //
-  //   const spans = [];
-
-  //   let i = 0;
-  //   while (i < children.length) {
-  //     const hlStart = i;
-  //     while (positions.has(start + i)) i++;
-  //     if (i > hlStart)
-  //       spans.push(`<strong>${children.substring(hlStart, i)}</strong>`);
-
-  //     const noHlStart = i;
-  //     while (i < children.length && !positions.has(start + i)) i++;
-  //     if (i > noHlStart) spans.push(children.substring(noHlStart, i));
-  //   }
-
-  //   return (
-  //     <div
-  //       className={className}
-  //       dangerouslySetInnerHTML={{ __html: spans.join("") }}
-  //     />
-  //   );
 };
 
 const ItemsListInner = memo(
@@ -65,90 +49,65 @@ const ItemsListInner = memo(
   }) => {
     const items = use(itemsPromise);
 
-    const [fzfV1, fzfV2] = useMemo(
-      () =>
-        (["v1", "v2"] as ("v1" | "v2")[]).map(
-          (fuzzy) =>
-            new AsyncFzf(items, {
-              fuzzy,
-              tiebreakers: [
-                (a, b) =>
-                  a.item.location.name.localeCompare(b.item.location.name),
-                (a, b) => a.item.bin_no - b.item.bin_no,
-                (a, b) => a.item.name.localeCompare(b.item.name),
-              ],
-              selector(item) {
-                return `${item.location.name}/${item.bin_no} ${item.name}`;
-              },
-            }),
-        ),
-
-      [items],
-    );
-
-    const allItemsPromise = useMemo(async () => {
-      const allItems: FzfResultItem<Item>[] = items.map((item) => ({
+    const allResults: SearchResult[] = useMemo(() => {
+      const results = items.map((item) => ({
         item,
-        positions: new Set(),
-        start: 0,
-        end: 0,
-        score: 0,
+        score: 1,
+        columns: [item.location.name, item.bin_no.toString(), item.name],
       }));
-      allItems.sort(
-        (a, b) =>
-          a.item.location.name.localeCompare(b.item.location.name) ||
-          a.item.bin_no - b.item.bin_no ||
-          a.item.name.localeCompare(b.item.name),
-      );
-      console.log(allItems);
-      return allItems;
+      results.sort(compareResults);
+      return results;
     }, [items]);
 
-    const filteredItemsPromise = useMemo(
-      () =>
-        search
-          ? (search.length > 3 ? fzfV2 : fzfV1).find(search)
-          : allItemsPromise,
-      [fzfV1, fzfV2, allItemsPromise, search],
-    );
+    const filteredResults: SearchResult[] = useMemo(() => {
+      if (!search) return allResults;
 
-    const filteredItems = use(filteredItemsPromise);
+      const results = fuzzysort
+        .go(search, items, {
+          keys: ["location.name", "bin_no", "name"],
+        })
+        .map((result) => ({
+          item: result.obj,
+          score: result.score,
+          columns: [
+            result[0].score ? result[0].highlight() : result.obj.location.name,
+            result[1].score
+              ? result[1].highlight()
+              : result.obj.bin_no.toString(),
+            result[2].score ? result[2].highlight() : result.obj.name,
+          ],
+        }));
+      results.sort(compareResults);
+      return results;
+    }, [items, allResults, search]);
 
-    if (filteredItems.length < 10) {
-      console.log(filteredItems);
+    if (filteredResults.length < 10) {
+      console.log(filteredResults);
     }
 
     return (
       <div className={itemClasses.list}>
-        {filteredItems.map(({ item, positions }) => {
-          const binNoStartIndex = item.location.name.length + 1;
-          const nameStartIndex =
-            `${item.location.name}/${item.bin_no}`.length + 1;
+        {filteredResults.map((result) => {
+          const item = result.item;
 
           return (
             <React.Fragment key={item.object_id}>
               <Highlightable
-                start={0}
-                positions={positions}
+                result={result}
+                column={0}
                 className={itemClasses.itemLocation}
-              >
-                {item.location.name}
-              </Highlightable>
+              />
               <div className={itemClasses.itemSlash}>/</div>
               <Highlightable
-                start={binNoStartIndex}
-                positions={positions}
+                result={result}
+                column={1}
                 className={itemClasses.itemBinNo}
-              >
-                {item.bin_no.toString()}
-              </Highlightable>
+              />
               <Highlightable
-                start={nameStartIndex}
-                positions={positions}
+                result={result}
+                column={2}
                 className={itemClasses.itemName}
-              >
-                {item.name}
-              </Highlightable>
+              />
             </React.Fragment>
           );
         })}

@@ -10,6 +10,18 @@
   grid-template-columns: 12em .5em minmax(2.5em, max-content) 1fr;
 }
 
+.lowScore {
+  opacity: 0.6;
+
+  b {
+    font-weight: 600;
+  }
+
+  .itemLocation b {
+    font-weight: 800;
+  }
+}
+
 .itemLocation {
   font-weight: 600;
   font-size: 1.5rem;
