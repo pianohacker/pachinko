@@ -1,15 +1,42 @@
-import { memo, Suspense, use, useDeferredValue, useMemo } from "react";
+import {
+  memo,
+  Suspense,
+  use,
+  useCallback,
+  useDeferredValue,
+  useMemo,
+} from "react";
 import { fetchApi } from "./api";
 import type { Item } from "./types";
 
 import itemClasses from "./ItemList.module.css";
-import React from "react";
 import fuzzysort from "fuzzysort";
+import {
+  ModuleRegistry,
+  ClientSideRowModelModule,
+  ValidationModule,
+  type ColDef,
+  themeQuartz,
+  CellStyleModule,
+  TextEditorModule,
+} from "ag-grid-community";
+import { AgGridReact } from "ag-grid-react";
+
+ModuleRegistry.registerModules([
+  ClientSideRowModelModule,
+  CellStyleModule,
+  TextEditorModule,
+]);
+// via process.env.NODE_ENV
+if (import.meta.env.VITE_ENV !== "production") {
+  ModuleRegistry.registerModules([ValidationModule]);
+}
 
 type SearchResult = {
   item: Item;
   columns: string[];
   score: number;
+  highlights: (() => string)[];
 };
 
 const compareResults = (a: SearchResult, b: SearchResult): number =>
@@ -39,6 +66,23 @@ const Highlightable = ({
   );
 };
 
+const agGridTheme = themeQuartz.withParams({
+  borderWidth: 0,
+  cellHorizontalPadding: ".25rem",
+  fontSize: "1.5rem",
+});
+
+const cellRenderer =
+  (i: number) =>
+  ({ data }: { data: SearchResult }) => {
+    const highlighted = data.highlights[i]?.();
+    return highlighted ? (
+      <span dangerouslySetInnerHTML={{ __html: highlighted }} />
+    ) : (
+      data.columns[i]
+    );
+  };
+
 const ItemsListInner = memo(
   ({
     itemsPromise,
@@ -54,6 +98,7 @@ const ItemsListInner = memo(
         item,
         score: 1,
         columns: [item.location.name, item.bin_no.toString(), item.name],
+        highlights: [],
       }));
       results.sort(compareResults);
       return results;
@@ -70,11 +115,14 @@ const ItemsListInner = memo(
           item: result.obj,
           score: result.score,
           columns: [
-            result[0].score ? result[0].highlight() : result.obj.location.name,
-            result[1].score
-              ? result[1].highlight()
-              : result.obj.bin_no.toString(),
-            result[2].score ? result[2].highlight() : result.obj.name,
+            result.obj.location.name,
+            result.obj.bin_no.toString(),
+            result.obj.name,
+          ],
+          highlights: [
+            result[0].highlight.bind(result[0]),
+            result[1].highlight.bind(result[1]),
+            result[2].highlight.bind(result[2]),
           ],
         }));
       results.sort(compareResults);
@@ -85,33 +133,56 @@ const ItemsListInner = memo(
       console.log(filteredResults);
     }
 
-    return (
-      <div className={itemClasses.list}>
-        {filteredResults.map((result) => {
-          const item = result.item;
+    const colDefs: ColDef<SearchResult>[] = useMemo(
+      () => [
+        {
+          colId: "location",
+          cellClass: itemClasses.itemLocation,
+          cellRenderer: cellRenderer(0),
+          editable: true,
+          cellEditor: "agTextCellEditor",
+          valueGetter: ({ data }) => data?.columns[0],
+        },
+        {
+          valueGetter: () => "/",
+          width: 10,
+          cellClass: itemClasses.itemSlash,
+          selectable: false,
+        },
+        {
+          colId: "bin_no",
+          width: 40,
+          cellClass: itemClasses.itemBinNo,
+          cellRenderer: cellRenderer(1),
+          editable: true,
+          valueGetter: ({ data }) => data?.columns[1],
+        },
+        {
+          colId: "name",
+          flex: 1,
+          cellRenderer: cellRenderer(2),
+          editable: true,
+          cellEditor: "agTextCellEditor",
+          valueGetter: ({ data }) => data?.columns[2],
+        },
+      ],
+      [],
+    );
 
-          return (
-            <React.Fragment key={item.object_id}>
-              <Highlightable
-                result={result}
-                column={0}
-                className={itemClasses.itemLocation}
-              />
-              <div className={itemClasses.itemSlash}>/</div>
-              <Highlightable
-                result={result}
-                column={1}
-                className={itemClasses.itemBinNo}
-              />
-              <Highlightable
-                result={result}
-                column={2}
-                className={itemClasses.itemName}
-              />
-            </React.Fragment>
-          );
-        })}
-      </div>
+    const onCellEditRequest = useCallback((event) => {
+      console.log({ event });
+    }, []);
+
+    return (
+      <AgGridReact
+        rowData={filteredResults}
+        columnDefs={colDefs}
+        theme={agGridTheme}
+        animateRows={false}
+        getRowId={(result) => (result.data.item.object_id || 0).toString()}
+        readOnlyEdit
+        onCellEditRequest={onCellEditRequest}
+      />
     );
   },
 );

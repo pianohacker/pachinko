@@ -1,6 +1,17 @@
 .listContainer {
   flex: 1 0 0px;
   overflow: auto;
+
+  :global(.ag-header) {
+    display: none;
+  }
+
+  :global(.ag-row-animation) :global(.ag-row) {
+    transition:
+        transform 0.2s,
+        top 0.2s,
+        opacity 0.1s;
+  }
 }
 
 .list {
@@ -24,19 +35,16 @@
 
 .itemLocation {
   font-weight: 600;
-  font-size: 1.5rem;
   text-align: right;
-}
-
-.itemSlash {
-  font-size: 1.5rem;
 }
 
 .itemBinNo {
   font-weight: 600;
-  font-size: 1.5rem;
+}
+
+.itemSlash {
+  text-align: center;
 }
 
 .itemName {
-  font-size: 1.5rem;
 }

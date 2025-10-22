@@ -10,8 +10,8 @@ declare const listContainer: string;
 declare const list: string;
 declare const lowScore: string;
 declare const itemLocation: string;
-declare const itemSlash: string;
 declare const itemBinNo: string;
+declare const itemSlash: string;
 declare const itemName: string;
 
 export {
@@ -19,8 +19,8 @@ export {
 	list,
 	lowScore,
 	itemLocation,
-	itemSlash,
 	itemBinNo,
+	itemSlash,
 	itemName
 };
 
@@ -29,8 +29,8 @@ declare const __default_export__: {
 	list: typeof list;
 	lowScore: typeof lowScore;
 	itemLocation: typeof itemLocation;
-	itemSlash: typeof itemSlash;
 	itemBinNo: typeof itemBinNo;
+	itemSlash: typeof itemSlash;
 	itemName: typeof itemName;
 };
 export default __default_export__;
