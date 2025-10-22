@@ -2,10 +2,10 @@ use actix_rt;
 use actix_web::{
     get,
     http::{self, StatusCode},
-    web, App, HttpResponse, HttpServer, Responder,
+    post, web, App, HttpResponse, HttpServer, Responder,
 };
 use clap::Args;
-use qualia::Queryable;
+use qualia::{ObjectShape, Queryable};
 use serde::Deserialize;
 
 use crate::{types::Item, CommonOpts, WithCommonOpts};
@@ -75,6 +75,59 @@ async fn get_items(
     Ok(response)
 }
 
+#[derive(Debug, Deserialize)]
+struct ItemUpdateRequest {
+    pub location_id: Option<i64>,
+    pub bin_no: Option<i64>,
+    pub name: Option<String>,
+    pub size: Option<String>,
+}
+
+#[post("/items/{id}")]
+async fn update_item(
+    opts: web::Data<ApiOpts>,
+    path: web::Path<(i64,)>,
+    body: web::Json<ItemUpdateRequest>,
+) -> Result<impl Responder> {
+    let id = path.into_inner().0;
+    let mut store = opts.common.open_store()?;
+
+    let item = match store
+        .query(Item::q().id(id))
+        .iter_converted::<Item>(&store)?
+        .next()
+    {
+        None => return Ok(HttpResponse::NotFound().json(qualia::Object::new())),
+        Some(i) => i,
+    };
+
+    let checkpoint = store.checkpoint()?;
+
+    let mut update = qualia::Object::new();
+    if let Some(location_id) = body.location_id {
+        update.insert("location_id".to_string(), location_id.into());
+    }
+    if let Some(bin_no) = body.bin_no {
+        update.insert("bin_no".to_string(), bin_no.into());
+    }
+    if let Some(ref name) = body.name {
+        update.insert("name".to_string(), name.into());
+    }
+    if let Some(ref size) = body.size {
+        update.insert("size".to_string(), size.into());
+    }
+
+    let num_updated = checkpoint.query(Item::q().id(id)).set(update)?;
+
+    if num_updated == 0 {
+        return Ok(HttpResponse::NotFound().json(qualia::Object::new()));
+    }
+
+    checkpoint.commit(format!("update item via HTTP API: {}", item.name))?;
+
+    Ok(HttpResponse::Ok().json(qualia::Object::new()))
+}
+
 pub fn run_api(opts: ApiOpts) -> crate::AHResult<()> {
     actix_rt::System::new().block_on(async move {
         let port = opts.port;
@@ -92,6 +145,7 @@ pub fn run_api(opts: ApiOpts) -> crate::AHResult<()> {
                 .wrap(cors)
                 .app_data(web::Data::new(opts.clone()))
                 .service(get_items)
+                .service(update_item)
         })
         .bind(("127.0.0.1", port))?
         .run()
