@@ -5,10 +5,13 @@ use actix_web::{
     post, web, App, HttpResponse, HttpServer, Responder,
 };
 use clap::Args;
-use qualia::{ObjectShape, Queryable};
+use qualia::Queryable;
 use serde::Deserialize;
 
-use crate::{types::Item, CommonOpts, WithCommonOpts};
+use crate::{
+    types::{Item, Location},
+    CommonOpts, WithCommonOpts,
+};
 
 #[derive(Args, Clone)]
 pub struct ApiOpts {
@@ -69,6 +72,20 @@ async fn get_items(
         store
             .query(query)
             .iter_converted::<Item>(&store)?
+            .collect::<Vec<_>>(),
+    );
+
+    Ok(response)
+}
+
+#[get("/locations")]
+async fn get_locations(opts: web::Data<ApiOpts>) -> Result<impl Responder> {
+    let store = opts.common.open_store()?;
+
+    let response = web::Json(
+        store
+            .query(Location::q())
+            .iter_converted::<Location>(&store)?
             .collect::<Vec<_>>(),
     );
 
@@ -145,6 +162,7 @@ pub fn run_api(opts: ApiOpts) -> crate::AHResult<()> {
                 .wrap(cors)
                 .app_data(web::Data::new(opts.clone()))
                 .service(get_items)
+                .service(get_locations)
                 .service(update_item)
         })
         .bind(("127.0.0.1", port))?

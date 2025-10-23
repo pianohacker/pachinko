@@ -6,6 +6,7 @@
  * https://npmjs.com/vite-css-modules
  */
 
+declare const errorMessage: string;
 declare const listContainer: string;
 declare const list: string;
 declare const lowScore: string;
@@ -15,6 +16,7 @@ declare const itemSlash: string;
 declare const itemName: string;
 
 export {
+	errorMessage,
 	listContainer,
 	list,
 	lowScore,
@@ -25,6 +27,7 @@ export {
 };
 
 declare const __default_export__: {
+	errorMessage: typeof errorMessage;
 	listContainer: typeof listContainer;
 	list: typeof list;
 	lowScore: typeof lowScore;

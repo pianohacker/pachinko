@@ -1,6 +1,6 @@
 export type ItemSize = "S" | "M" | "L" | "X";
 
-export type Location = {
+export type ItemLocation = {
   object_id: number | null;
   name: string;
   num_bins: number;
@@ -9,7 +9,7 @@ export type Location = {
 export type Item = {
   object_id: number | null;
   name: string;
-  location: Location;
+  location: ItemLocation;
   bin_no: number;
   size: string;
 };

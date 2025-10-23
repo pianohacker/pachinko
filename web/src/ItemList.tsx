@@ -4,10 +4,13 @@ import {
   use,
   useCallback,
   useDeferredValue,
+  useEffect,
   useMemo,
+  useRef,
+  useState,
 } from "react";
 import { fetchApi } from "./api";
-import type { Item } from "./types";
+import type { Item, ItemLocation } from "./types";
 
 import itemClasses from "./ItemList.module.css";
 import fuzzysort from "fuzzysort";
@@ -19,6 +22,12 @@ import {
   themeQuartz,
   CellStyleModule,
   TextEditorModule,
+  SelectEditorModule,
+  type CellEditingStoppedEvent,
+  type RowClassParams,
+  RowStyleModule,
+  RenderApiModule,
+  NumberEditorModule,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 
@@ -26,6 +35,10 @@ ModuleRegistry.registerModules([
   ClientSideRowModelModule,
   CellStyleModule,
   TextEditorModule,
+  NumberEditorModule,
+  SelectEditorModule,
+  RowStyleModule,
+  RenderApiModule,
 ]);
 // via process.env.NODE_ENV
 if (import.meta.env.VITE_ENV !== "production") {
@@ -45,30 +58,10 @@ const compareResults = (a: SearchResult, b: SearchResult): number =>
   a.item.bin_no - b.item.bin_no ||
   a.item.name.localeCompare(b.item.name);
 
-const Highlightable = ({
-  result,
-  column,
-  className,
-}: {
-  result: SearchResult;
-  column: number;
-  className: string;
-}) => {
-  return (
-    <div
-      className={
-        className + (result.score < 0.4 ? ` ${itemClasses.lowScore}` : "")
-      }
-      dangerouslySetInnerHTML={{
-        __html: result.columns[column],
-      }}
-    />
-  );
-};
-
 const agGridTheme = themeQuartz.withParams({
   borderWidth: 0,
   cellHorizontalPadding: ".25rem",
+  fontFamily: "Spectral",
   fontSize: "1.5rem",
 });
 
@@ -76,6 +69,7 @@ const cellRenderer =
   (i: number) =>
   ({ data }: { data: SearchResult }) => {
     const highlighted = data.highlights[i]?.();
+
     return highlighted ? (
       <span dangerouslySetInnerHTML={{ __html: highlighted }} />
     ) : (
@@ -86,12 +80,17 @@ const cellRenderer =
 const ItemsListInner = memo(
   ({
     itemsPromise,
+    locationsPromise,
     search,
+    setErrorMessage,
   }: {
     itemsPromise: Promise<Item[]>;
+    locationsPromise: Promise<ItemLocation[]>;
     search: string;
+    setErrorMessage: (x: string) => void;
   }) => {
     const items = use(itemsPromise);
+    const locations = use(locationsPromise);
 
     const allResults: SearchResult[] = useMemo(() => {
       const results = items.map((item) => ({
@@ -129,25 +128,32 @@ const ItemsListInner = memo(
       return results;
     }, [items, allResults, search]);
 
-    if (filteredResults.length < 10) {
-      console.log(filteredResults);
-    }
-
-    const colDefs: ColDef<SearchResult>[] = useMemo(
-      () => [
+    const colDefs = useMemo(
+      (): ColDef<SearchResult>[] => [
         {
           colId: "location",
           cellClass: itemClasses.itemLocation,
           cellRenderer: cellRenderer(0),
           editable: true,
-          cellEditor: "agTextCellEditor",
+          cellEditor: "agSelectCellEditor",
+          cellEditorParams: {
+            values: locations.map(({ name }) => name),
+          },
           valueGetter: ({ data }) => data?.columns[0],
+          valueSetter: ({ data, newValue }) => {
+            const newLocation = locations.find(({ name }) => name == newValue);
+            if (!newLocation) return false;
+
+            delete data.highlights[0];
+            data.item.location = newLocation;
+            data.columns[0] = newValue;
+            return true;
+          },
         },
         {
           valueGetter: () => "/",
           width: 10,
           cellClass: itemClasses.itemSlash,
-          selectable: false,
         },
         {
           colId: "bin_no",
@@ -155,7 +161,23 @@ const ItemsListInner = memo(
           cellClass: itemClasses.itemBinNo,
           cellRenderer: cellRenderer(1),
           editable: true,
+          cellEditorSelector: ({ data }) => ({
+            component: "agNumberCellEditor",
+            params: {
+              min: 1,
+              max: data.item.location.num_bins,
+            },
+          }),
           valueGetter: ({ data }) => data?.columns[1],
+          valueSetter: ({ data, newValue }) => {
+            const newBinNo = parseInt(newValue);
+            if (!isNaN(newBinNo)) return false;
+
+            delete data.highlights[1];
+            data.item.bin_no = newBinNo;
+            data.columns[1] = newBinNo.toString();
+            return true;
+          },
         },
         {
           colId: "name",
@@ -164,24 +186,86 @@ const ItemsListInner = memo(
           editable: true,
           cellEditor: "agTextCellEditor",
           valueGetter: ({ data }) => data?.columns[2],
+          valueSetter: ({ data, newValue }) => {
+            const newName = (newValue as string).trim();
+            if (!newName) return false;
+
+            delete data.highlights[2];
+            data.item.name = newValue;
+            data.columns[2] = newValue;
+            return true;
+          },
         },
       ],
+      [locations],
+    );
+
+    const getRowClass = useCallback(
+      ({ data }: RowClassParams<SearchResult>) => {
+        if (!data) return undefined;
+
+        return data.score < 0.3 ? itemClasses.lowScore : undefined;
+      },
       [],
     );
 
-    const onCellEditRequest = useCallback((event) => {
-      console.log({ event });
-    }, []);
+    const onCellEditingStopped = useCallback(
+      async (event: CellEditingStoppedEvent<SearchResult>) => {
+        if (!event.data || !event.valueChanged) return;
+        const { item } = event.data;
+
+        const update: { location_id?: number } & Partial<
+          Pick<Item, "bin_no" | "name">
+        > = {};
+
+        switch (event.colDef.colId) {
+          case "location":
+            if (!item.location.object_id) return;
+
+            update.location_id = item.location.object_id;
+            break;
+          case "bin_no":
+            update.bin_no = item.bin_no;
+            break;
+          case "name":
+            update.name = item.name;
+            break;
+        }
+
+        try {
+          await fetchApi(`/items/${item.object_id}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(update),
+          });
+        } catch (e) {
+          console.error(`Failed to update item: ${e}`);
+          setErrorMessage(`Failed to update item, please reload: ${e}`);
+        }
+      },
+      [setErrorMessage],
+    );
+
+    const gridRef = useRef<AgGridReact<SearchResult> | null>(null);
+
+    useEffect(() => {
+      if (!gridRef.current?.api) return;
+
+      gridRef.current.api.refreshCells({ force: true });
+    }, [filteredResults]);
 
     return (
       <AgGridReact
+        ref={gridRef}
         rowData={filteredResults}
+        getRowClass={getRowClass}
         columnDefs={colDefs}
         theme={agGridTheme}
         animateRows={false}
         getRowId={(result) => (result.data.item.object_id || 0).toString()}
-        readOnlyEdit
-        onCellEditRequest={onCellEditRequest}
+        onCellEditingStopped={onCellEditingStopped}
       />
     );
   },
@@ -195,10 +279,26 @@ export const ItemList = ({ search }: { search: string }) => {
     [],
   );
 
+  const locationsPromise = useMemo(
+    () =>
+      fetchApi("/locations").then((r) => r.json()) as Promise<ItemLocation[]>,
+    [],
+  );
+
+  const [errorMessage, setErrorMessage] = useState("");
+
   return (
     <section className={itemClasses.listContainer}>
+      {errorMessage && (
+        <div className={itemClasses.errorMessage}>{errorMessage}</div>
+      )}
       <Suspense fallback={<p>Loading ...</p>}>
-        <ItemsListInner itemsPromise={itemsPromise} search={deferredSearch} />
+        <ItemsListInner
+          itemsPromise={itemsPromise}
+          locationsPromise={locationsPromise}
+          search={deferredSearch}
+          setErrorMessage={setErrorMessage}
+        />
       </Suspense>
     </section>
   );

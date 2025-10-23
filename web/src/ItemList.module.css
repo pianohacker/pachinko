@@ -1,6 +1,12 @@
+.errorMessage {
+  color: #600;
+  font-size: 1.5em;
+  padding: 0.5em;
+  text-align: center;
+}
+
 .listContainer {
   flex: 1 0 0px;
-  overflow: auto;
 
   :global(.ag-header) {
     display: none;
