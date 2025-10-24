@@ -165,7 +165,7 @@ pub fn run_api(opts: ApiOpts) -> crate::AHResult<()> {
                 .service(get_locations)
                 .service(update_item)
         })
-        .bind(("127.0.0.1", port))?
+        .bind(("localhost", port))?
         .run()
         .await
     })?;
