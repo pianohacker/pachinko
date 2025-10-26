@@ -1,0 +1,105 @@
+.container {
+  position: relative;
+  height: 2rem;
+}
+
+.addItem {
+  background-image: var(--image-bg), linear-gradient(var(--color-overlay), var(--color-overlay));
+  background-size: 66%, auto;
+  box-shadow: #00000066 0 -2px 5px 0;
+
+  display: flex;
+  flex-direction: column;
+  height: 5em;
+  width: 100%;
+
+  transition: 0.15s bottom ease-in-out;
+  position: absolute;
+  bottom: 0;
+
+  &.hidden {
+    bottom: -3rem;
+  }
+}
+
+.toggle {
+  display: flex;
+  font-size: 0.8rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: 700;
+
+  &:hover {
+    background-color: var(--color-hover);
+  }
+}
+
+.inputs {
+  display: flex;
+  gap: .5rem;
+  padding: .5rem;
+  height: 3rem;
+
+  input, select, button {
+    font-family: inherit;
+    font-size: 1rem;
+    padding: 0 .5rem;
+  }
+}
+
+.binNoInput {
+  width: 3rem;
+}
+
+.nameInput {
+  flex: 1 0 0px;
+}
+
+.sizePicker {
+  width: 2rem;
+}
+
+.loadingOverlay {
+  background: var(--color-bg);
+  position: absolute;
+  inset: 0;
+
+  animation-fill-mode: forwards;
+  animation-duration: 0.2s;
+
+  &.visible {
+    animation-name: fade-in-over;
+  }
+
+  &.hidden {
+    animation-name: fade-out-over;
+  }
+}
+
+@keyframes fade-in-over {
+  0% {
+    z-index: 1;
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 0.6;
+  }
+}
+
+@keyframes fade-out-over {
+  0% {
+    opacity: 0.6;
+  }
+
+  99% {
+    z-index: -1;
+  }
+
+  100% {
+    opacity: 0;
+    z-index: -1;
+  }
+}

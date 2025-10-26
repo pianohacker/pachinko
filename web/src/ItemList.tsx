@@ -24,21 +24,27 @@ import {
   TextEditorModule,
   SelectEditorModule,
   type CellEditingStoppedEvent,
-  type RowClassParams,
   RowStyleModule,
   RenderApiModule,
   NumberEditorModule,
+  type GetRowIdParams,
+  ClientSideRowModelApiModule,
+  ScrollApiModule,
+  type RowClassRules,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
+import { AddItem } from "./AddItem";
 
 ModuleRegistry.registerModules([
-  ClientSideRowModelModule,
   CellStyleModule,
-  TextEditorModule,
+  ClientSideRowModelApiModule,
+  ClientSideRowModelModule,
   NumberEditorModule,
-  SelectEditorModule,
-  RowStyleModule,
   RenderApiModule,
+  RowStyleModule,
+  ScrollApiModule,
+  SelectEditorModule,
+  TextEditorModule,
 ]);
 // via process.env.NODE_ENV
 if (import.meta.env.VITE_ENV !== "production") {
@@ -53,16 +59,19 @@ type SearchResult = {
 };
 
 const compareResults = (a: SearchResult, b: SearchResult): number =>
-  Math.round(b.score * 20) / 20 - Math.round(a.score * 20) / 20 ||
+  b.score - a.score ||
   a.item.location.name.localeCompare(b.item.location.name) ||
   a.item.bin_no - b.item.bin_no ||
   a.item.name.localeCompare(b.item.name);
 
 const agGridTheme = themeQuartz.withParams({
+  backgroundColor: "transparent",
   borderWidth: 0,
   cellHorizontalPadding: ".25rem",
+
+  rowHoverColor: "var(--color-hover)",
   fontFamily: "Spectral",
-  fontSize: "1.5rem",
+  fontSize: "1rem",
 });
 
 const cellRenderer =
@@ -134,6 +143,7 @@ const ItemsListInner = memo(
           colId: "location",
           cellClass: itemClasses.itemLocation,
           cellRenderer: cellRenderer(0),
+          flex: 1,
           editable: true,
           cellEditor: "agSelectCellEditor",
           cellEditorParams: {
@@ -152,7 +162,7 @@ const ItemsListInner = memo(
         },
         {
           valueGetter: () => "/",
-          width: 10,
+          width: 5,
           cellClass: itemClasses.itemSlash,
         },
         {
@@ -171,7 +181,7 @@ const ItemsListInner = memo(
           valueGetter: ({ data }) => data?.columns[1],
           valueSetter: ({ data, newValue }) => {
             const newBinNo = parseInt(newValue);
-            if (!isNaN(newBinNo)) return false;
+            if (isNaN(newBinNo)) return false;
 
             delete data.highlights[1];
             data.item.bin_no = newBinNo;
@@ -181,7 +191,8 @@ const ItemsListInner = memo(
         },
         {
           colId: "name",
-          flex: 1,
+          flex: 4,
+          cellClass: itemClasses.itemName,
           cellRenderer: cellRenderer(2),
           editable: true,
           cellEditor: "agTextCellEditor",
@@ -200,12 +211,10 @@ const ItemsListInner = memo(
       [locations],
     );
 
-    const getRowClass = useCallback(
-      ({ data }: RowClassParams<SearchResult>) => {
-        if (!data) return undefined;
-
-        return data.score < 0.3 ? itemClasses.lowScore : undefined;
-      },
+    const rowClassRules: RowClassRules = useMemo(
+      () => ({
+        [itemClasses.lowScore]: "data.score < 0.3",
+      }),
       [],
     );
 
@@ -251,22 +260,94 @@ const ItemsListInner = memo(
     const gridRef = useRef<AgGridReact<SearchResult> | null>(null);
 
     useEffect(() => {
-      if (!gridRef.current?.api) return;
+      if (!gridRef.current?.api || gridRef.current.api.isDestroyed()) return;
 
       gridRef.current.api.refreshCells({ force: true });
     }, [filteredResults]);
 
+    const getRowId = useCallback(
+      (result: GetRowIdParams<SearchResult>) =>
+        (result.data.item.object_id || 0).toString() +
+        (result.data.score < 0.3),
+      [],
+    );
+
+    const [lastItemAddTimestamp, setLastItemAddTimestamp] =
+      useState<Date | null>(null);
+
+    const [isItemAdding, setIsItemAdding] = useState(false);
+
+    const onAddItem = useCallback(
+      async (item: Item) => {
+        setIsItemAdding(true);
+
+        let object_id: number;
+
+        try {
+          const response = await fetchApi(`/items`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              ...item,
+              location_id: item.location.object_id,
+            }),
+          });
+
+          ({ object_id } = (await response.json()) as { object_id: number });
+        } catch (e) {
+          console.error(`Failed to add item: ${e}`);
+          setErrorMessage(`Failed to add item, please reload: ${e}`);
+
+          return;
+        } finally {
+          setLastItemAddTimestamp(new Date());
+          setIsItemAdding(false);
+        }
+
+        item.object_id = object_id;
+        items.unshift(item);
+
+        if (!gridRef.current?.api || gridRef.current.api.isDestroyed()) return;
+
+        const newResult: SearchResult = {
+          item,
+          columns: [item.location.name, item.bin_no.toString(), item.name],
+          score: 1,
+          highlights: [],
+        };
+
+        gridRef.current.api.applyTransaction({
+          addIndex: 0,
+          add: [newResult],
+        });
+
+        gridRef.current.api.ensureIndexVisible(0);
+      },
+      [items],
+    );
+
     return (
-      <AgGridReact
-        ref={gridRef}
-        rowData={filteredResults}
-        getRowClass={getRowClass}
-        columnDefs={colDefs}
-        theme={agGridTheme}
-        animateRows={false}
-        getRowId={(result) => (result.data.item.object_id || 0).toString()}
-        onCellEditingStopped={onCellEditingStopped}
-      />
+      <>
+        <AgGridReact
+          ref={gridRef}
+          className={itemClasses.grid}
+          rowData={filteredResults}
+          rowClassRules={rowClassRules}
+          columnDefs={colDefs}
+          theme={agGridTheme}
+          animateRows={false}
+          getRowId={getRowId}
+          onCellEditingStopped={onCellEditingStopped}
+        />
+        <AddItem
+          locations={locations}
+          lastItemAddTimestamp={lastItemAddTimestamp}
+          isItemAdding={isItemAdding}
+          onAddItem={onAddItem}
+        />
+      </>
     );
   },
 );

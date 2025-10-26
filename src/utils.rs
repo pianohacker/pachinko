@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::types::{Item, ItemSize, Location};
 use crate::AHResult;
 
-fn _choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> {
+pub fn choose_bin(store: &Store, location_id: i64, num_bins: i64) -> AHResult<i64> {
     let all_location_items = store.query(Q.equal("type", "item").equal("location_id", location_id));
 
     let mut bin_fullnesses: HashMap<i64, i64> = (1..=num_bins).map(|bin_no| (bin_no, 0)).collect();
@@ -54,7 +54,7 @@ pub fn add_item(
             }
             n
         }
-        None => _choose_bin(&store, location.object_id.unwrap(), location.num_bins)?,
+        None => choose_bin(&store, location.object_id.unwrap(), location.num_bins)?,
     };
 
     let checkpoint = store.checkpoint()?;

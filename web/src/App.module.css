@@ -1,32 +1,43 @@
 .main {
   display: flex;
   flex-direction: column;
-  gap: 2em;
 
   height: 100vh;
   width: 100vw;
-  padding: 2em;
+
+  --image-bg: url(canvas.jpg);
+
+  --color-bg: oklch(88.7% 0.009 82.1);
+  --color-hover: oklch(88.7% 0.009 202.1 / .6);
+  --color-overlay: oklch(88.7% 0.009 322.1 / .6);
 }
 
 .mainHeader {
+  background-image: var(--image-bg);
+  background-size: 66%;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 2em;
+  gap: 1.5em;
   max-width: 100%;
+  padding: 1em;
+  z-index: 1;
+
+  box-shadow: #00000066 0 2px 5px 0;
 
   h1 {
-    font-size: 2.5em;
+    font-size: 1.5em;
     margin: 0;
     padding: 0;
-    width: 14rem;
+    width: 8rem;
     text-align: right;
   }
 }
 
 .search {
-  font-size: 1.5rem;
   flex: 1 0 0px;
+  font-size: 1rem;
+  min-width: 0;
   padding: .5em;
 }

@@ -6,6 +6,14 @@
 }
 
 .listContainer {
+  display: flex;
+  flex: 1 0 0px;
+  flex-direction: column;
+
+  overflow: hidden;
+}
+
+.grid {
   flex: 1 0 0px;
 
   :global(.ag-header) {
@@ -18,13 +26,11 @@
         top 0.2s,
         opacity 0.1s;
   }
-}
 
-.list {
-  display: grid;
-  column-gap: .25em;
-  row-gap: .5em;
-  grid-template-columns: 12em .5em minmax(2.5em, max-content) 1fr;
+  :global(.ag-center-cols-container) {
+    background-image: var(--image-bg), linear-gradient(var(--color-overlay), var(--color-overlay));
+    background-size: 66%;
+  }
 }
 
 .lowScore {
@@ -42,6 +48,7 @@
 .itemLocation {
   font-weight: 600;
   text-align: right;
+  padding-left: 1rem !important;
 }
 
 .itemBinNo {
@@ -53,4 +60,5 @@
 }
 
 .itemName {
+  padding-right: 1rem !important;
 }

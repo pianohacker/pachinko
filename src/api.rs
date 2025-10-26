@@ -5,11 +5,13 @@ use actix_web::{
     post, web, App, HttpResponse, HttpServer, Responder,
 };
 use clap::Args;
-use qualia::Queryable;
+use qualia::{object, Object, Queryable};
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::{
     types::{Item, Location},
+    utils::choose_bin,
     CommonOpts, WithCommonOpts,
 };
 
@@ -93,6 +95,50 @@ async fn get_locations(opts: web::Data<ApiOpts>) -> Result<impl Responder> {
 }
 
 #[derive(Debug, Deserialize)]
+struct ItemCreateRequest {
+    pub location_id: i64,
+    pub bin_no: i64,
+    pub name: String,
+    pub size: String,
+}
+
+#[post("/items")]
+async fn create_item(
+    opts: web::Data<ApiOpts>,
+    body: web::Json<ItemCreateRequest>,
+) -> Result<impl Responder> {
+    let mut store = opts.common.open_store()?;
+
+    let location = match store
+        .query(Location::q().id(body.location_id))
+        .iter_converted::<Location>(&store)?
+        .next()
+    {
+        None => return Ok(HttpResponse::NotFound().json(qualia::Object::new())),
+        Some(i) => i,
+    };
+
+    let checkpoint = store.checkpoint()?;
+
+    let mut item = Item {
+        object_id: None,
+        location: location,
+        bin_no: body.bin_no,
+        name: body.name.clone(),
+        size: body.size.clone(),
+        rest: object!(),
+    };
+
+    checkpoint.add_with_id(&mut item)?;
+
+    checkpoint.commit(format!("update item via HTTP API: {}", item.name))?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "object_id": item.object_id
+    })))
+}
+
+#[derive(Debug, Deserialize)]
 struct ItemUpdateRequest {
     pub location_id: Option<i64>,
     pub bin_no: Option<i64>,
@@ -114,7 +160,7 @@ async fn update_item(
         .iter_converted::<Item>(&store)?
         .next()
     {
-        None => return Ok(HttpResponse::NotFound().json(qualia::Object::new())),
+        None => return Ok(HttpResponse::NotFound().json(json!({}))),
         Some(i) => i,
     };
 
@@ -142,7 +188,31 @@ async fn update_item(
 
     checkpoint.commit(format!("update item via HTTP API: {}", item.name))?;
 
-    Ok(HttpResponse::Ok().json(qualia::Object::new()))
+    Ok(HttpResponse::Ok().json(json!({})))
+}
+
+#[get("/locations/{id}/next-item-bin")]
+async fn get_location_next_item_bin(
+    opts: web::Data<ApiOpts>,
+    path: web::Path<(i64,)>,
+) -> Result<impl Responder> {
+    let id = path.into_inner().0;
+    let store = opts.common.open_store()?;
+
+    let location = match store
+        .query(Location::q().id(id))
+        .iter_converted::<Location>(&store)?
+        .next()
+    {
+        None => return Ok(HttpResponse::NotFound().json(qualia::Object::new())),
+        Some(i) => i,
+    };
+
+    let bin_no = choose_bin(&store, location.object_id.unwrap(), location.num_bins)?;
+
+    let response = web::Json(json!({"bin_no": bin_no}));
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 pub fn run_api(opts: ApiOpts) -> crate::AHResult<()> {
@@ -163,6 +233,8 @@ pub fn run_api(opts: ApiOpts) -> crate::AHResult<()> {
                 .app_data(web::Data::new(opts.clone()))
                 .service(get_items)
                 .service(get_locations)
+                .service(get_location_next_item_bin)
+                .service(create_item)
                 .service(update_item)
         })
         .bind(("localhost", port))?
