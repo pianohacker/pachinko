@@ -4,7 +4,7 @@
 }
 
 .addItem {
-  background-image: var(--image-bg), linear-gradient(var(--color-overlay), var(--color-overlay));
+  background-image:linear-gradient(var(--color-overlay), var(--color-overlay)), var(--image-bg);
   background-size: 66%, auto;
   box-shadow: #00000066 0 -2px 5px 0;
 

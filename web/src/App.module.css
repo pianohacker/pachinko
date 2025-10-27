@@ -9,11 +9,11 @@
 
   --color-bg: oklch(88.7% 0.009 82.1);
   --color-hover: oklch(88.7% 0.009 202.1 / .6);
-  --color-overlay: oklch(88.7% 0.009 322.1 / .6);
+  --color-overlay: oklch(88.7% 0.009 322.1 / .4);
 }
 
 .mainHeader {
-  background-image: var(--image-bg);
+  background-image:linear-gradient(var(--color-overlay), var(--color-overlay)), var(--image-bg);
   background-size: 66%;
   display: flex;
   flex-direction: row;
