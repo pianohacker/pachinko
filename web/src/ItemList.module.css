@@ -60,5 +60,10 @@
 }
 
 .itemName {
+}
+
+.itemSize {
+  font-weight: 600;
+  text-align: center;
   padding-right: 1rem !important;
 }

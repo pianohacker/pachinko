@@ -14,6 +14,7 @@ declare const itemLocation: string;
 declare const itemBinNo: string;
 declare const itemSlash: string;
 declare const itemName: string;
+declare const itemSize: string;
 
 export {
 	errorMessage,
@@ -23,7 +24,8 @@ export {
 	itemLocation,
 	itemBinNo,
 	itemSlash,
-	itemName
+	itemName,
+	itemSize
 };
 
 declare const __default_export__: {
@@ -35,5 +37,6 @@ declare const __default_export__: {
 	itemBinNo: typeof itemBinNo;
 	itemSlash: typeof itemSlash;
 	itemName: typeof itemName;
+	itemSize: typeof itemSize;
 };
 export default __default_export__;
