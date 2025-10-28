@@ -301,6 +301,7 @@ const ItemsListInner = memo(
       if (!gridRef.current?.api || gridRef.current.api.isDestroyed()) return;
 
       gridRef.current.api.refreshCells({ force: true });
+      gridRef.current.api.ensureIndexVisible(0);
     }, [filteredResults]);
 
     const getRowId = useCallback(
