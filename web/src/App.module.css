@@ -5,7 +5,7 @@
   height: 100vh;
   width: 100vw;
 
-  --image-bg: url(canvas.jpg);
+  --image-bg: url(/canvas.jpg);
 
   --color-bg: oklch(88.7% 0.009 82.1);
   --color-hover: oklch(88.7% 0.009 202.1 / .6);
