@@ -53,6 +53,15 @@ impl actix_web::ResponseError for Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[get("/last-checkpoint-id")]
+async fn get_last_checkpoint_id(opts: web::Data<ApiOpts>) -> Result<impl Responder> {
+    let store = opts.common.open_store()?;
+
+    let last_checkpoint_id = store.last_checkpoint_id()?;
+
+    Ok(HttpResponse::Ok().json(json!({"checkpoint_id": last_checkpoint_id})))
+}
+
 #[derive(Debug, Deserialize)]
 struct ItemsRequest {
     q: Option<String>,
@@ -133,8 +142,11 @@ async fn create_item(
 
     checkpoint.commit(format!("update item via HTTP API: {}", item.name))?;
 
+    let last_checkpoint_id = store.last_checkpoint_id()?;
+
     Ok(HttpResponse::Ok().json(json!({
-        "object_id": item.object_id
+        "object_id": item.object_id,
+        "checkpoint_id": last_checkpoint_id,
     })))
 }
 
@@ -188,7 +200,11 @@ async fn update_item(
 
     checkpoint.commit(format!("update item via HTTP API: {}", item.name))?;
 
-    Ok(HttpResponse::Ok().json(json!({})))
+    let last_checkpoint_id = store.last_checkpoint_id()?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "checkpoint_id": last_checkpoint_id,
+    })))
 }
 
 #[get("/locations/{id}/next-item-bin")]
@@ -231,6 +247,7 @@ pub fn run_api(opts: ApiOpts) -> crate::AHResult<()> {
             App::new()
                 .wrap(cors)
                 .app_data(web::Data::new(opts.clone()))
+                .service(get_last_checkpoint_id)
                 .service(get_items)
                 .service(get_locations)
                 .service(get_location_next_item_bin)
