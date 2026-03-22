@@ -7,8 +7,8 @@
  */
 
 declare const container: string;
-declare const addItem: string;
 declare const hidden: string;
+declare const addItem: string;
 declare const toggle: string;
 declare const inputs: string;
 declare const binNoInput: string;
@@ -21,8 +21,8 @@ declare const visible: string;
 
 export {
 	container,
-	addItem,
 	hidden,
+	addItem,
 	toggle,
 	inputs,
 	binNoInput,
@@ -34,8 +34,8 @@ export {
 
 declare const __default_export__: {
 	container: typeof container;
-	addItem: typeof addItem;
 	hidden: typeof hidden;
+	addItem: typeof addItem;
 	toggle: typeof toggle;
 	inputs: typeof inputs;
 	binNoInput: typeof binNoInput;

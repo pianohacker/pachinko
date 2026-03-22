@@ -1,25 +1,23 @@
 .container {
+  box-shadow: #00000066 0 -2px 5px 0;
+
+  transition: 0.15s margin-top ease-in-out;
   position: relative;
-  height: 2rem;
+  margin-top: 0;
+
+  &.hidden {
+    margin-top: -3rem;
+  }
 }
 
 .addItem {
   background-image:linear-gradient(var(--color-overlay), var(--color-overlay)), var(--image-bg);
   background-size: 66%, auto;
-  box-shadow: #00000066 0 -2px 5px 0;
 
   display: flex;
   flex-direction: column;
   height: 5em;
   width: 100%;
-
-  transition: 0.15s bottom ease-in-out;
-  position: absolute;
-  bottom: 0;
-
-  &.hidden {
-    bottom: -3rem;
-  }
 }
 
 .toggle {

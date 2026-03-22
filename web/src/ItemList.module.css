@@ -45,10 +45,13 @@
   }
 }
 
+.itemSelection {
+  padding-left: 1rem !important;
+}
+
 .itemLocation {
   font-weight: 600;
   text-align: right;
-  padding-left: 1rem !important;
 }
 
 .itemBinNo {

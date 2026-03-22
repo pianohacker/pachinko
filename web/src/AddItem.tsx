@@ -95,12 +95,12 @@ export const AddItem = ({
   }, []);
 
   return (
-    <div className={addItemClasses.container}>
-      <section
-        className={
-          addItemClasses.addItem + (hidden ? ` ${addItemClasses.hidden}` : "")
-        }
-      >
+    <div
+      className={
+        addItemClasses.container + (hidden ? ` ${addItemClasses.hidden}` : "")
+      }
+    >
+      <section className={addItemClasses.addItem}>
         <div
           className={
             addItemClasses.loadingOverlay +
@@ -108,9 +108,6 @@ export const AddItem = ({
             (isItemAdding ? addItemClasses.visible : addItemClasses.hidden)
           }
         />
-        <div className={addItemClasses.toggle} onClick={onClickToggle}>
-          Add +
-        </div>
         <div className={addItemClasses.inputs} onKeyDown={onKeyDown}>
           <select
             value={location.object_id!.toString()}
@@ -156,6 +153,9 @@ export const AddItem = ({
           <button className={addItemClasses.sizePicker} onClick={increaseSize}>
             {size}
           </button>
+        </div>
+        <div className={addItemClasses.toggle} onClick={onClickToggle}>
+          Add +
         </div>
       </section>
     </div>

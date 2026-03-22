@@ -11,6 +11,7 @@ declare const listContainer: string;
 declare const grid: string;
 declare const lowScore: string;
 declare const itemLocation: string;
+declare const itemSelection: string;
 declare const itemBinNo: string;
 declare const itemSlash: string;
 declare const itemName: string;
@@ -22,6 +23,7 @@ export {
 	grid,
 	lowScore,
 	itemLocation,
+	itemSelection,
 	itemBinNo,
 	itemSlash,
 	itemName,
@@ -34,6 +36,7 @@ declare const __default_export__: {
 	grid: typeof grid;
 	lowScore: typeof lowScore;
 	itemLocation: typeof itemLocation;
+	itemSelection: typeof itemSelection;
 	itemBinNo: typeof itemBinNo;
 	itemSlash: typeof itemSlash;
 	itemName: typeof itemName;

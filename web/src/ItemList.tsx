@@ -32,6 +32,7 @@ import {
   ScrollApiModule,
   type RowClassRules,
   type CellRendererSelectorFunc,
+  RowSelectionModule,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import { AddItem } from "./AddItem";
@@ -42,6 +43,7 @@ ModuleRegistry.registerModules([
   ClientSideRowModelModule,
   NumberEditorModule,
   RenderApiModule,
+  RowSelectionModule,
   RowStyleModule,
   ScrollApiModule,
   SelectEditorModule,
@@ -369,6 +371,12 @@ const ItemsListInner = memo(
 
     return (
       <>
+        <AddItem
+          locations={locations}
+          lastItemAddTimestamp={lastItemAddTimestamp}
+          isItemAdding={isItemAdding}
+          onAddItem={onAddItem}
+        />
         <AgGridReact
           ref={gridRef}
           className={itemClasses.grid}
@@ -380,12 +388,10 @@ const ItemsListInner = memo(
           columnDefs={colDefs}
           singleClickEdit
           onCellEditingStopped={onCellEditingStopped}
-        />
-        <AddItem
-          locations={locations}
-          lastItemAddTimestamp={lastItemAddTimestamp}
-          isItemAdding={isItemAdding}
-          onAddItem={onAddItem}
+          rowSelection={{ mode: "multiRow", checkboxes: true }}
+          selectionColumnDef={{
+            cellClass: itemClasses.itemSelection,
+          }}
         />
       </>
     );
