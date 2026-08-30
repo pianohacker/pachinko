@@ -31,6 +31,10 @@
     background-image: var(--image-bg), linear-gradient(var(--color-overlay), var(--color-overlay));
     background-size: 66%;
   }
+
+  :global(.ag-popup-child) {
+    background: white;
+  }
 }
 
 .lowScore {

@@ -148,6 +148,7 @@ export const AddItem = ({
             className={addItemClasses.nameInput}
             value={name.toString()}
             onChange={(e) => setName(e.target.value)}
+            placeholder="New item name..."
           />
 
           <button className={addItemClasses.sizePicker} onClick={increaseSize}>

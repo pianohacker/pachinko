@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { fetchApi } from "./api";
+import { ITEM_SIZES } from "./types";
 import type { Item, ItemLocation } from "./types";
 
 import itemClasses from "./ItemList.module.css";
@@ -122,7 +123,12 @@ const ItemsListInner = memo(
       const results = items.map((item) => ({
         item,
         score: 1,
-        columns: [item.location.name, item.bin_no.toString(), item.name],
+        columns: [
+          item.location.name,
+          item.bin_no.toString(),
+          item.name,
+          item.size,
+        ],
         highlights: [],
       }));
       results.sort(compareResults);
@@ -144,6 +150,7 @@ const ItemsListInner = memo(
               result.obj.location.name,
               result.obj.bin_no.toString(),
               result.obj.name,
+              result.obj.size,
             ],
             highlights: [
               result[0].indexes.length > 0
@@ -234,9 +241,21 @@ const ItemsListInner = memo(
         },
         {
           colId: "size",
-          width: 56,
+          width: 80,
           field: "item.size",
           cellClass: itemClasses.itemSize,
+          cellRendererSelector: cellRendererSelector(3),
+          editable: true,
+          cellEditor: "agSelectCellEditor",
+          cellEditorParams: {
+            values: ITEM_SIZES,
+          },
+          valueGetter: ({ data }) => data?.columns[3],
+          valueSetter: ({ data, newValue }) => {
+            data.item.size = newValue;
+            data.columns[3] = newValue;
+            return true;
+          },
         },
       ],
       [locations],
@@ -289,6 +308,9 @@ const ItemsListInner = memo(
             break;
           case "name":
             update.name = item.name;
+            break;
+          case "size":
+            update.size = item.size;
             break;
         }
 

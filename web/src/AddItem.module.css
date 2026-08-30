@@ -39,20 +39,32 @@
   gap: .5rem;
   padding: .5rem;
   height: 3rem;
+  width: 100%;
 
   input, select, button {
     font-family: inherit;
     font-size: 1rem;
     padding: 0 .5rem;
   }
+
+  select {
+	flex: 0 1 auto;
+	min-width: 4rem;
+
+	@media only screen and (max-width: 768px) {
+		flex: 0 1 0;
+	}
+  }
 }
 
 .binNoInput {
+  flex: 0 0 0px;
   width: 3rem;
 }
 
 .nameInput {
   flex: 1 0 0px;
+  min-width: 8rem;
 }
 
 .sizePicker {
