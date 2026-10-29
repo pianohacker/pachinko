@@ -376,7 +376,7 @@ const ItemsListInner = memo(
 
         const newResult: SearchResult = {
           item,
-          columns: [item.location.name, item.bin_no.toString(), item.name],
+          columns: [item.location.name, item.bin_no.toString(), item.name, item.size],
           score: 1,
           highlights: [],
         };
